@@ -1,6 +1,6 @@
 # IT Asset Management System — Production Installation & Deployment Guide
 
-This document provides complete, production-grade instructions for installing, configuring, and deploying the **IT Asset Management** panel on a Linux server.
+This document provides complete, production-grade instructions for installing, configuring, and deploying the **IT Asset Management** panel on a Linux VPS or dedicated server.
 
 ---
 
@@ -25,21 +25,33 @@ This document provides complete, production-grade instructions for installing, c
 ### Software Prerequisites (Handled automatically by `install.sh`)
 - **Node.js**: `v20.x LTS` (or `v18.x+` minimum)
 - **npm**: `v9.x+` or `v10.x+`
-- **System Utilities**: `curl`, `git`, `tar`, `ca-certificates`, `gcc/make`
+- **System Utilities**: `curl`, `git`, `tar`, `ca-certificates`, `gcc/make`, `procps`, `lsof`
 
 ---
 
-## 2. Automated Installation (Recommended)
+## 2. Automated Step-by-Step Installation (Recommended)
 
-The repository includes a self-contained, idempotent installation script (`install.sh`) that:
-1. Detects your Linux distribution and package manager (`apt`, `dnf`, `yum`, `pacman`).
-2. Checks whether required tools are already installed to avoid duplicate package downloads.
-3. Configures and installs Node.js 20 LTS if missing or outdated.
-4. Interactively prompts for your chosen port (or accepts command-line flags).
-5. Installs project npm packages safely (`npm install --legacy-peer-deps`).
-6. Compiles the production bundle via Vite (`dist/`).
-7. Sets up and enables a Linux `systemd` daemon service for background execution and automatic reboot recovery.
-8. Automatically opens the designated port in `ufw` or `firewalld` if active.
+The installation script (`install.sh`) executes **17 clearly numbered steps** with real-time progress percentages, comprehensive error handling, and unified logging to `/var/log/itam-install.log`:
+
+```
+[Step 1/17]  [6%]   Detect Linux Distribution & Version
+[Step 2/17]  [12%]  Check System CPU Architecture & Memory
+[Step 3/17]  [18%]  Check Root & Sudo Permissions
+[Step 4/17]  [24%]  Check Internet Connectivity
+[Step 5/17]  [30%]  Update System Package Index (apt / dnf / yum)
+[Step 6/17]  [36%]  Install Required System Dependencies
+[Step 7/17]  [42%]  Install Compatible Node.js & npm (v20 LTS)
+[Step 8/17]  [48%]  Install Project Dependencies via npm
+[Step 9/17]  [54%]  Configure Environment Variables (.env)
+[Step 10/17] [60%]  Configure Server IP Address (Public / Local)
+[Step 11/17] [66%]  Configure Application Network Port
+[Step 12/17] [72%]  Build Production Web Bundle via Vite (dist/)
+[Step 13/17] [78%]  Create Dedicated Linux System User (itam)
+[Step 14/17] [84%]  Configure Systemd Background Daemon Service
+[Step 15/17] [90%]  Start Application Service (systemctl)
+[Step 16/17] [95%]  Verify Application Health & HTTP Connectivity
+[Step 17/17] [100%] Display Installation Results & Dashboard URLs
+```
 
 ### Quick Start (Single Command)
 
@@ -82,60 +94,29 @@ bash install.sh -p 3000 --skip-systemd -y
 
 ---
 
-## 4. Manual Step-by-Step Installation
+## 4. Node.js Installation & Root Cause Fix
 
-If you prefer to install dependencies manually without using `install.sh`:
-
-### Step 4.1: Install Node.js 20 LTS
-
-#### On Ubuntu / Debian:
-```bash
-sudo apt update && sudo apt install -y curl ca-certificates git build-essential
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
+### Previous Issue
+Older scripts failed with:
+```text
+install.sh: line 262: -E: command not found
+curl: Failed writing body
+Installation failed with error code 127.
 ```
 
-#### On AlmaLinux / Rocky Linux / RHEL:
-```bash
-sudo dnf install -y curl ca-certificates git gcc-c++ make
-# Enable Node.js 20 module or NodeSource:
-sudo dnf module reset -y nodejs || true
-sudo dnf module enable -y nodejs:20 || (curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -)
-sudo dnf install -y nodejs
-```
+### Root Cause & Resolution
+When running as root, `$SUDO_CMD` evaluated to an empty string (`""`), turning `$SUDO_CMD -E bash -` into the invalid command `-E bash -`. 
 
-Verify the installation:
-```bash
-node -v   # Expected: v20.x.x
-npm -v    # Expected: 10.x.x
-```
-
-### Step 4.2: Clone & Install Dependencies
-```bash
-git clone https://github.com/mohammadaminkhoshnasab-alt/asset-managment.git
-cd asset-managment
-
-# Install application dependencies
-npm install --legacy-peer-deps
-```
-
-### Step 4.3: Build Production Bundle
-```bash
-npm run build
-# Verified output should exist at ./dist/index.html
-```
-
-### Step 4.4: Launch the Server
-To run directly in terminal on port `3000`:
-```bash
-npx vite preview --port 3000 --host 0.0.0.0
-```
+**The Fix Implemented in `install.sh`:**
+1. A robust `run_root` function was added that executes commands directly when running as root and prepends `sudo` only when running as an unprivileged user.
+2. The NodeSource setup script is downloaded safely to a temporary file (`mktemp`) with curl verification, eliminating broken pipe issues.
+3. Node.js version is verified immediately after installation. If already present and `>= v18.x`, existing installations are preserved.
 
 ---
 
 ## 5. Systemd Background Service Management
 
-When installed with `systemd` enabled, the application runs continuously as the service `itam.service`.
+When installed, the application runs continuously as the service `itam.service` under the dedicated system user `itam`.
 
 ### Service Control Commands
 
@@ -152,12 +133,12 @@ When installed with `systemd` enabled, the application runs continuously as the 
 ### Systemd Unit File Configuration (`/etc/systemd/system/itam.service`)
 ```ini
 [Unit]
-Description=IT Asset Management Frontend Service
+Description=IT Asset Management Service
 After=network.target
 
 [Service]
 Type=simple
-User=root
+User=itam
 WorkingDirectory=/path/to/asset-managment
 ExecStart=/usr/bin/npx vite preview --port 3000 --host 0.0.0.0
 Restart=always
@@ -168,18 +149,12 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=itam
 
-# Hardening
-ProtectSystem=full
-NoNewPrivileges=true
+# Security Hardening
+LimitNOFILE=65535
+TimeoutStopSec=15
 
 [Install]
 WantedBy=multi-user.target
-```
-
-After modifying the service file:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart itam
 ```
 
 ---
@@ -246,8 +221,6 @@ sudo systemctl restart nginx
 sudo certbot --nginx -d assets.company.com
 ```
 
-Certbot will automatically configure HTTPS redirects and automated certificate renewals.
-
 ---
 
 ## 8. Troubleshooting & FAQ
@@ -275,30 +248,8 @@ sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
-### Issue: Permission denied running `install.sh`
-**Solution**: Grant executable permissions to the script:
+### Issue: Diagnostic Log Inspection
+The installer writes full execution logs to `/var/log/itam-install.log` (or `./install.log`). Inspect with:
 ```bash
-chmod +x install.sh
-./install.sh
+cat /var/log/itam-install.log | tail -n 50
 ```
-
-### Issue: SELinux blocking network connection on AlmaLinux / Rocky Linux
-**Symptom**: Cannot connect via Nginx reverse proxy.
-**Solution**: Allow Nginx to connect to network upstream ports:
-```bash
-sudo setsebool -P httpd_can_network_connect 1
-```
-
----
-
-## 9. Verification Checklist
-
-To confirm your installation is production-ready:
-
-- [ ] `node -v` outputs `v20.x` or higher.
-- [ ] `npm -v` outputs `v9.x` or higher.
-- [ ] `dist/index.html` exists and was compiled by `npm run build`.
-- [ ] `./start.sh` or `systemctl status itam` indicates active listening on the configured port.
-- [ ] Accessing `http://<SERVER_IP>:<PORT>` loads the IT Asset Management dashboard in the browser.
-- [ ] Light / Dark mode toggle operates smoothly.
-- [ ] Excel import preview functions correctly.
