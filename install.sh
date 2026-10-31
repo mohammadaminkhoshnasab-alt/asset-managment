@@ -113,12 +113,21 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Banner ---
-echo -e "${BLUE}${BOLD}"
-echo "=========================================================================="
-echo "    ${APP_DISPLAY_NAME} - Automated Linux Production Installer"
-echo "    سامانه مدیریت دارایی‌های فناوری اطلاعات - نصب و پیکربندی خودکار لینوکس"
-echo "=========================================================================="
+echo -e "${CYAN}${BOLD}"
+cat << "EOF"
+  ___ _____      _                    _     __  __                                                   _   
+ |_ _|_   _|    / \   ___ ___  ___  | |_  |  \/  | __ _ _ __   __ _  __ _  ___ _ __ ___   ___ _ __ | |_ 
+  | |  | |     / _ \ / __/ __|/ _ \ | __| | |\/| |/ _` | '_ \ / _` |/ _` |/ _ \ '_ ` _ \ / _ \ '_ \| __|
+  | |  | |    / ___ \\__ \__ \  __/ | |_  | |  | | (_| | | | | (_| | (_| |  __/ | | | | |  __/ | | | |_ 
+ |___| |_|   /_/   \_\___/___/\___|  \__| |_|  |_|\__,_|_| |_|\__,_|\__, |\___|_| |_| |_|\___|_| |_|\__|
+                                                                      |___/                                
+EOF
 echo -e "${NC}"
+echo -e "${BLUE}${BOLD}========================================================================================${NC}"
+echo -e "${GREEN}${BOLD}    ${APP_DISPLAY_NAME} - Enterprise Linux Installer${NC}"
+echo -e "${CYAN}    سامانه جامع مدیریت دارایی‌های فناوری اطلاعات - نصب و استقرار خودکار${NC}"
+echo -e "${BLUE}${BOLD}========================================================================================${NC}"
+echo ""
 log_info "Installation directory: ${APP_DIR}"
 
 # --- Check Privileges ---
@@ -399,17 +408,35 @@ log_success "Production build verified: '${APP_DIR}/dist' compiled successfully.
 log_step "Step 7: Generating Control Scripts (start.sh, start-dev.sh, stop.sh)"
 
 # 1. start.sh (Production preview runner)
-cat <<EOF > "${APP_DIR}/start.sh"
+cat << "EOF_START" > "${APP_DIR}/start.sh"
 #!/usr/bin/env bash
-# Quick Production Launcher for ${APP_DISPLAY_NAME}
-DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-PORT=\${PORT:-${TARGET_PORT}}
+# Quick Production Launcher for IT Asset Management
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PORT=${PORT:-3000}
 
-echo "Starting ${APP_DISPLAY_NAME} on port \$PORT..."
-echo "Local URL: http://localhost:\$PORT"
-cd "\$DIR"
-exec npx vite preview --port "\$PORT" --host 0.0.0.0
-EOF
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+echo -e "${CYAN}${BOLD}"
+cat << "EOF_BANNER"
+  ___ _____      _                    _     __  __                                                   _   
+ |_ _|_   _|    / \   ___ ___  ___  | |_  |  \/  | __ _ _ __   __ _  __ _  ___ _ __ ___   ___ _ __ | |_ 
+  | |  | |     / _ \ / __/ __|/ _ \ | __| | |\/| |/ _` | '_ \ / _` |/ _` |/ _ \ '_ ` _ \ / _ \ '_ \| __|
+  | |  | |    / ___ \\__ \__ \  __/ | |_  | |  | | (_| | | | | (_| | (_| |  __/ | | | | |  __/ | | | |_ 
+ |___| |_|   /_/   \_\___/___/\___|  \__| |_|  |_|\__,_|_| |_|\__,_|\__, |\___|_| |_| |_|\___|_| |_|\__|
+                                                                      |___/                                
+EOF_BANNER
+echo -e "${NC}"
+echo -e "${GREEN}${BOLD}▶ Starting IT Asset Management on port ${PORT}...${NC}"
+echo -e "${CYAN}Local URL:${NC} http://localhost:${PORT}"
+echo ""
+
+cd "$DIR"
+exec npx vite preview --port "$PORT" --host 0.0.0.0
+EOF_START
 chmod +x "${APP_DIR}/start.sh"
 
 # 2. start-dev.sh (Development runner)
