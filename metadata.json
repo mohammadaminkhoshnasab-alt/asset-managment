@@ -1,0 +1,6 @@
+{
+  "name": "IT Asset Management",
+  "description": "Internal enterprise IT Asset Management web application for hardware lifecycle tracking, handovers, returns, and inventory audits.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
