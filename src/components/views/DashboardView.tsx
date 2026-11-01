@@ -1,13 +1,15 @@
 /**
- * IT Asset Management - Dashboard View
- * Modern Minimalist SaaS Dashboard featuring 7 summary KPI cards and urgent operational queues.
+ * IT Asset Management - Dashboard View (Industrial Neo-Brutalist Redesign)
+ * Features solid color-block KPI cards, SVG donut status gauge, timeline activity feed,
+ * compact decorative equipment showcase module, and urgent operational queues including
+ * the Employee "Confirm Receipt" workflow.
  */
 
 import React, { useEffect, useState } from 'react';
 import {
   Laptop,
   CheckCircle2,
-  Package,
+  Box,
   Clock,
   AlertTriangle,
   Archive,
@@ -18,6 +20,9 @@ import {
   UserCheck,
   RotateCcw,
   Sparkles,
+  Users,
+  ChevronRight,
+  ExternalLink,
 } from 'lucide-react';
 import { Asset, DashboardMetrics, HandoverRecord, ReturnRecord } from '../../types/asset.ts';
 import { assetService, getSubordinateAssets, isNeedsReview } from '../../services/assetService.ts';
@@ -30,6 +35,7 @@ export const DashboardView: React.FC = () => {
   const [handovers, setHandovers] = useState<HandoverRecord[]>([]);
   const [returns, setReturns] = useState<ReturnRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
@@ -55,25 +61,28 @@ export const DashboardView: React.FC = () => {
   }, [currentUser, refreshTrigger]);
 
   const handleConfirmReceipt = async (handoverId: string) => {
+    setConfirmingId(handoverId);
     try {
       await assetService.confirmHandover(handoverId);
       triggerRefresh();
     } catch (err) {
-      console.error(err);
+      console.error('Failed to confirm handover receipt:', err);
+    } finally {
+      setConfirmingId(null);
     }
   };
 
-  // Filter queues based on role
+  // Operational Queues
   const needsReviewAssets = assets.filter((a) => a.status !== 'Disposed' && isNeedsReview(a.revision));
   const pendingHandovers = handovers.filter((h) => h.confirmationState === 'Pending Confirmation');
 
-  // Activity feed combining recent handovers and returns
+  // Combined Activity feed for Recent Activities module
   const recentActivities = [
     ...handovers.map((h) => ({
       id: h.id,
       kind: 'handover' as const,
       date: h.createdAt,
-      title: `${h.type} Handover: ${h.assetNumber}`,
+      title: `Asset assigned: ${h.assetNumber}`,
       desc: `Assigned to ${h.employeeName} (${h.personalCode})`,
       itUser: h.itUserName,
       condition: h.condition,
@@ -82,319 +91,484 @@ export const DashboardView: React.FC = () => {
       id: r.id,
       kind: 'return' as const,
       date: r.createdAt,
-      title: `Stock Return: ${r.assetNumber}`,
+      title: `Asset returned: ${r.assetNumber}`,
       desc: `Returned by ${r.employeeName}`,
       itUser: r.itUserName,
       condition: r.condition,
     })),
-  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 5);
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 4);
+
+  // Donut Gauge math
+  const total = metrics?.allDevices || 1;
+  const inUseCount = metrics?.inUse || 0;
+  const spareCount = metrics?.spare || 0;
+  const maintenanceCount = (metrics?.needsReview || 0) + (metrics?.disposed || 0);
+
+  const inUsePercent = Math.round((inUseCount / total) * 100);
+  const sparePercent = Math.round((spareCount / total) * 100);
+  const maintenancePercent = Math.max(0, 100 - inUsePercent - sparePercent);
+
+  // SVG stroke-dasharray calculations for 100 circumference
+  const radius = 38;
+  const circumference = 2 * Math.PI * radius; // ~238.76
+  const inUseOffset = 0;
+  const inUseLength = (inUsePercent / 100) * circumference;
+  const spareLength = (sparePercent / 100) * circumference;
+  const maintenanceLength = (maintenancePercent / 100) * circumference;
 
   return (
-    <div className="space-y-6">
-      {/* Scope Context Banner */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4.5 shadow-xs dark:border-slate-800 dark:bg-slate-900 transition-colors">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold tracking-tight text-slate-900 dark:text-white">
-              Executive IT Fleet Overview
-            </h1>
-            <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-900/40">
-              {currentUser.role}
+    <div className="space-y-5">
+      {/* Top Header Lockup matching Reference Image */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-[#D2C8B8] dark:border-[#2B323D]">
+        <div className="flex items-center gap-3">
+          {/* Angled striped icon */}
+          <div className="flex items-center gap-1">
+            <span className="font-industrial-display font-black text-2xl text-[#E49C52] dark:text-[#E7A45F] tracking-tighter">
+              ///
             </span>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            {currentUser.role === 'IT Admin' &&
-              'Global IT administrator workspace. Displaying enterprise-wide hardware metrics, pending workflows, and stock balance.'}
-            {currentUser.role === 'Manager / Supervisor' &&
-              `Supervisor view for ${currentUser.name}. Visibility is focused on subordinate employees and their allocated devices.`}
-            {currentUser.role === 'Employee' &&
-              `Employee self-service view for ${currentUser.name}. Inspect personal assignments and sign off on equipment handovers.`}
-          </p>
+          <div>
+            <h1 className="font-industrial-display text-2xl sm:text-3xl font-black uppercase tracking-tight text-[#141312] dark:text-[#F2EFE9] leading-none">
+              DASHBOARD
+            </h1>
+            <p className="text-xs text-[#6E6960] dark:text-[#7C8797] font-medium mt-1">
+              {currentUser.role === 'IT Admin' && 'Enterprise hardware fleet overview, audit compliance, and stock balance.'}
+              {currentUser.role === 'Manager / Supervisor' && `Supervisor console for ${currentUser.name}. Subordinate equipment visibility.`}
+              {currentUser.role === 'Employee' && `Employee workstation console for ${currentUser.name}. Assigned hardware and handovers.`}
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+
+        <div className="flex items-center gap-2">
+          <span className="rounded border border-[#D2C8B8] bg-[#E5DFD2] px-2.5 py-1 text-[11px] font-mono-tabular font-bold uppercase text-[#141312] dark:border-[#2B323D] dark:bg-[#181C24] dark:text-[#F2EFE9]">
+            {currentUser.role}
+          </span>
           <button
             onClick={() => setActiveView('assets')}
-            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors"
+            className="flex items-center gap-1.5 rounded bg-[#141312] text-[#F8F4EC] dark:bg-[#F2EFE9] dark:text-[#12151B] px-3 py-1.5 text-xs font-bold hover:opacity-90 transition-opacity font-industrial-display"
           >
-            <span>Browse All Assets</span>
+            <span>REGISTRY</span>
             <ArrowRight className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
 
-      {/* 7 Standardized Summary KPI Cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
-        {/* 1. All Devices */}
+      {/* 4 Solid Modular Color-Block KPI Cards matching Reference Image */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        {/* 1. Total Assets (Industrial Amber Block) */}
         <div
-          onClick={() => setActiveView('assets')}
-          className="group relative cursor-pointer rounded-xl border border-slate-200 bg-white p-4 shadow-xs transition-all hover:border-blue-400 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-700"
+          onClick={() => {
+            setSelectedAssetNumber(null);
+            setActiveView('assets');
+          }}
+          className="relative overflow-hidden rounded-lg bg-[#E49C52] text-black dark:bg-[#E7A45F] dark:text-black p-4.5 cursor-pointer hover:brightness-105 transition-all shadow-sm"
         >
-          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <span className="text-xs font-semibold">All Devices</span>
-            <Laptop className="h-4 w-4 text-slate-400 group-hover:text-blue-600 transition-colors" />
+          <div className="flex items-start justify-between">
+            <span className="text-xs font-black uppercase tracking-wider font-industrial-display opacity-90">
+              Total Assets
+            </span>
+            <Laptop className="h-6 w-6 opacity-85" />
           </div>
-          <p className="mt-3 text-2xl font-bold tracking-tight text-slate-900 dark:text-white font-mono tabular-nums">
-            {isLoading ? '—' : metrics?.allDevices}
-          </p>
-          <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">Total cataloged fleet</p>
+
+          <div className="mt-3 font-industrial-display text-4xl font-black tracking-tight font-mono-tabular">
+            {metrics?.allDevices ?? '—'}
+          </div>
+
+          <div className="mt-3 flex items-center justify-between text-xs font-bold font-mono-tabular">
+            <span className="flex items-center gap-1 opacity-90">
+              <span>↑</span> 100% REGISTRY
+            </span>
+
+            {/* Diagonal Hazard Stripes */}
+            <div className="h-3 w-16 hazard-stripes-amber opacity-90 rounded-xs" />
+          </div>
         </div>
 
-        {/* 2. In Use (Status) */}
+        {/* 2. Assigned Assets (In Use - Sage Green Block) */}
         <div
-          onClick={() => setActiveView('assets')}
-          className="group relative cursor-pointer rounded-xl border border-slate-200 bg-white p-4 shadow-xs transition-all hover:border-emerald-400 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-emerald-700"
+          onClick={() => {
+            setSelectedAssetNumber(null);
+            setActiveView('assets');
+          }}
+          className="relative overflow-hidden rounded-lg bg-[#5D7F5F] text-black dark:bg-[#668768] dark:text-black p-4.5 cursor-pointer hover:brightness-105 transition-all shadow-sm"
         >
-          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <span className="text-xs font-semibold">In Use</span>
-            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+          <div className="flex items-start justify-between">
+            <span className="text-xs font-black uppercase tracking-wider font-industrial-display opacity-90">
+              Assigned Assets
+            </span>
+            <Users className="h-6 w-6 opacity-85" />
           </div>
-          <p className="mt-3 text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">
-            {isLoading ? '—' : metrics?.inUse}
-          </p>
-          <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">Active assignments</p>
+
+          <div className="mt-3 font-industrial-display text-4xl font-black tracking-tight font-mono-tabular">
+            {metrics?.inUse ?? '—'}
+          </div>
+
+          <div className="mt-3 flex items-center justify-between text-xs font-bold font-mono-tabular">
+            <span className="flex items-center gap-1 opacity-90">
+              <span>↑</span> {inUsePercent}% IN USE
+            </span>
+
+            {/* Diagonal Hazard Stripes */}
+            <div className="h-3 w-16 hazard-stripes-amber opacity-90 rounded-xs" />
+          </div>
         </div>
 
-        {/* 3. Spare / IT Stock (Status) */}
+        {/* 3. Available Assets (Spare - Terracotta Rust / Steel Blue Block) */}
         <div
-          onClick={() => setActiveView('assets')}
-          className="group relative cursor-pointer rounded-xl border border-slate-200 bg-white p-4 shadow-xs transition-all hover:border-blue-400 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-700"
+          onClick={() => {
+            setSelectedAssetNumber(null);
+            setActiveView('assets');
+          }}
+          className="relative overflow-hidden rounded-lg bg-[#B2534C] text-black dark:bg-[#B85D56] dark:text-black p-4.5 cursor-pointer hover:brightness-105 transition-all shadow-sm"
         >
-          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <span className="text-xs font-semibold">Spare / IT Stock</span>
-            <Package className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          <div className="flex items-start justify-between">
+            <span className="text-xs font-black uppercase tracking-wider font-industrial-display opacity-90">
+              Available Assets
+            </span>
+            <Box className="h-6 w-6 opacity-85" />
           </div>
-          <p className="mt-3 text-2xl font-bold tracking-tight text-blue-600 dark:text-blue-400 font-mono tabular-nums">
-            {isLoading ? '—' : metrics?.spare}
-          </p>
-          <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">Ready in IT stockroom</p>
+
+          <div className="mt-3 font-industrial-display text-4xl font-black tracking-tight font-mono-tabular">
+            {metrics?.spare ?? '—'}
+          </div>
+
+          <div className="mt-3 flex items-center justify-between text-xs font-bold font-mono-tabular">
+            <span className="flex items-center gap-1 opacity-90">
+              <span>↑</span> {sparePercent}% IN STOCK
+            </span>
+
+            {/* Diagonal Hazard Stripes */}
+            <div className="h-3 w-16 hazard-stripes-amber opacity-90 rounded-xs" />
+          </div>
         </div>
 
-        {/* 4. TEMP Active Handovers (Operational indicator) */}
+        {/* 4. Action / Operational Queue Indicator (Grey / Steel Block) */}
         <div
-          onClick={() => setActiveView('assets')}
-          className="group relative cursor-pointer rounded-xl border border-amber-200/80 bg-amber-50/20 p-4 shadow-xs transition-all hover:border-amber-400 dark:border-amber-900/40 dark:bg-amber-950/10"
+          onClick={() => {
+            setSelectedAssetNumber(null);
+            setActiveView('assets');
+          }}
+          className="relative overflow-hidden rounded-lg bg-[#C8BFB0] text-black dark:bg-[#4A607A] dark:text-black p-4.5 cursor-pointer hover:brightness-105 transition-all shadow-sm"
         >
-          <div className="flex items-center justify-between text-amber-800 dark:text-amber-300">
-            <span className="text-xs font-semibold">TEMP Handovers</span>
-            <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          <div className="flex items-start justify-between">
+            <span className="text-xs font-black uppercase tracking-wider font-industrial-display opacity-90">
+              Pending Actions
+            </span>
+            <Clock className="h-6 w-6 opacity-85" />
           </div>
-          <p className="mt-3 text-2xl font-bold tracking-tight text-amber-700 dark:text-amber-300 font-mono tabular-nums">
-            {isLoading ? '—' : metrics?.tempActiveHandovers}
-          </p>
-          <p className="mt-1 text-[11px] text-amber-600/80 dark:text-amber-400/80">Temporary loans</p>
-        </div>
 
-        {/* 5. Needs Review (Operational indicator: Revision date only) */}
-        <div
-          onClick={() => setActiveView('assets')}
-          className="group relative cursor-pointer rounded-xl border border-rose-200/80 bg-rose-50/20 p-4 shadow-xs transition-all hover:border-rose-400 dark:border-rose-900/40 dark:bg-rose-950/10"
-        >
-          <div className="flex items-center justify-between text-rose-800 dark:text-rose-300">
-            <span className="text-xs font-semibold">Needs Review</span>
-            <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+          <div className="mt-3 font-industrial-display text-4xl font-black tracking-tight font-mono-tabular">
+            {pendingHandovers.length + needsReviewAssets.length}
           </div>
-          <p className="mt-3 text-2xl font-bold tracking-tight text-rose-600 dark:text-rose-400 font-mono tabular-nums">
-            {isLoading ? '—' : metrics?.needsReview}
-          </p>
-          <p className="mt-1 text-[11px] text-rose-600/80 dark:text-rose-400/80">Revision &gt; 6 mo.</p>
-        </div>
 
-        {/* 6. Disposed (Status) */}
-        <div
-          onClick={() => setActiveView('assets')}
-          className="group relative cursor-pointer rounded-xl border border-slate-200 bg-white p-4 shadow-xs transition-all hover:border-slate-400 dark:border-slate-800 dark:bg-slate-900"
-        >
-          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <span className="text-xs font-semibold">Disposed</span>
-            <Archive className="h-4 w-4 text-slate-400" />
-          </div>
-          <p className="mt-3 text-2xl font-bold tracking-tight text-slate-600 dark:text-slate-400 font-mono tabular-nums">
-            {isLoading ? '—' : metrics?.disposed}
-          </p>
-          <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">Recycled / E-Waste</p>
-        </div>
+          <div className="mt-3 flex items-center justify-between text-xs font-bold font-mono-tabular">
+            <span className="flex items-center gap-1 opacity-90">
+              <span>!</span> {pendingHandovers.length} S-OFF / {needsReviewAssets.length} REV
+            </span>
 
-        {/* 7. Pending Confirmations (Operational indicator) */}
-        <div
-          onClick={() => setActiveView('assets')}
-          className="group relative cursor-pointer rounded-xl border border-purple-200/80 bg-purple-50/20 p-4 shadow-xs transition-all hover:border-purple-400 dark:border-purple-900/40 dark:bg-purple-950/10"
-        >
-          <div className="flex items-center justify-between text-purple-800 dark:text-purple-300">
-            <span className="text-xs font-semibold">Pending Sign-off</span>
-            <FileCheck2 className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+            {/* Diagonal Hazard Stripes */}
+            <div className="h-3 w-16 hazard-stripes-amber opacity-90 rounded-xs" />
           </div>
-          <p className="mt-3 text-2xl font-bold tracking-tight text-purple-700 dark:text-purple-300 font-mono tabular-nums">
-            {isLoading ? '—' : metrics?.pendingConfirmations}
-          </p>
-          <p className="mt-1 text-[11px] text-purple-600/80 dark:text-purple-400/80">Awaiting employee</p>
         </div>
       </div>
 
-      {/* Main Grid: Operational Attention Queues & Audit Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column (2 spans): Operational Queues */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Pending Handover Confirmations Queue */}
-          <div className="rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900 transition-colors">
-            <div className="flex items-center justify-between border-b border-slate-100 p-4 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <FileCheck2 className="h-4 w-4 text-purple-600 dark:text-purple-400" />
-                <h2 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                  Pending Handover Confirmations ({pendingHandovers.length})
-                </h2>
-              </div>
-              <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                Requires recipient employee receipt verification
-              </span>
-            </div>
-
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {pendingHandovers.length === 0 ? (
-                <div className="p-6 text-center text-xs text-slate-400 dark:text-slate-500">
-                  All active handovers have been confirmed. No pending sign-offs.
-                </div>
-              ) : (
-                pendingHandovers.map((h) => (
-                  <div key={h.id} className="p-4 flex items-center justify-between gap-4">
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-semibold text-slate-900 dark:text-white">
-                          {h.assetNumber}
-                        </span>
-                        <span className="text-slate-400">·</span>
-                        <span className="text-xs text-slate-600 dark:text-slate-300 font-medium truncate">
-                          Recipient: {h.employeeName} ({h.personalCode})
-                        </span>
-                        <span className="text-slate-400">·</span>
-                        <span className="text-xs text-purple-700 dark:text-purple-300 font-medium">
-                          {h.type}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Dispatched by {h.itUserName} on {new Date(h.handoverDate).toLocaleDateString()} ·
-                        Condition: <strong>{h.condition}</strong>
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => handleConfirmReceipt(h.id)}
-                        className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-purple-700 dark:bg-purple-500 dark:hover:bg-purple-600 transition-colors"
-                      >
-                        Confirm Receipt
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+      {/* Middle Section: Donut Status Gauge + Recent Activities + Compact Decorative Equipment Showcase */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch">
+        {/* Left: Asset Status Donut Gauge (4 cols) */}
+        <div className="lg:col-span-4 rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] p-4.5 dark:border-[#2B323D] dark:bg-[#12151B] flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-industrial-display text-sm font-black uppercase tracking-wider text-[#141312] dark:text-[#F2EFE9]">
+              Asset Status
+            </h3>
+            <span className="font-mono-tabular text-[10px] text-[#6E6960] dark:text-[#7C8797]">
+              EXACT 3-STATUS MODEL
+            </span>
           </div>
 
-          {/* Overdue Revision Alerts (Needs Review) */}
-          <div className="rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900 transition-colors">
-            <div className="flex items-center justify-between border-b border-slate-100 p-4 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400" />
-                <h2 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                  Assets Needing Revision ({needsReviewAssets.length})
-                </h2>
+          <div className="flex items-center justify-around gap-4 my-auto">
+            {/* Donut SVG */}
+            <div className="relative flex items-center justify-center shrink-0">
+              <svg className="h-32 w-32 -rotate-90 transform" viewBox="0 0 100 100">
+                {/* Background Track */}
+                <circle
+                  cx="50"
+                  cy="50"
+                  r={radius}
+                  fill="transparent"
+                  stroke="currentColor"
+                  strokeWidth="12"
+                  className="text-[#E5DFD2] dark:text-[#181C24]"
+                />
+
+                {/* In Use Segment (Sage Green) */}
+                <circle
+                  cx="50"
+                  cy="50"
+                  r={radius}
+                  fill="transparent"
+                  stroke="#5D7F5F"
+                  strokeWidth="12"
+                  strokeDasharray={`${inUseLength} ${circumference}`}
+                  strokeDashoffset="0"
+                  className="dark:stroke-[#668768] transition-all duration-500"
+                />
+
+                {/* Available Segment (Amber) */}
+                <circle
+                  cx="50"
+                  cy="50"
+                  r={radius}
+                  fill="transparent"
+                  stroke="#E49C52"
+                  strokeWidth="12"
+                  strokeDasharray={`${spareLength} ${circumference}`}
+                  strokeDashoffset={-inUseLength}
+                  className="dark:stroke-[#E7A45F] transition-all duration-500"
+                />
+
+                {/* Disposed / Needs Review Segment (Terracotta) */}
+                <circle
+                  cx="50"
+                  cy="50"
+                  r={radius}
+                  fill="transparent"
+                  stroke="#B2534C"
+                  strokeWidth="12"
+                  strokeDasharray={`${maintenanceLength} ${circumference}`}
+                  strokeDashoffset={-(inUseLength + spareLength)}
+                  className="dark:stroke-[#B85D56] transition-all duration-500"
+                />
+              </svg>
+
+              {/* Center Metrics Text */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                <span className="font-industrial-display text-xl font-black text-[#141312] dark:text-[#F2EFE9] font-mono-tabular leading-none">
+                  {metrics?.allDevices ?? 0}
+                </span>
+                <span className="font-mono-tabular text-[10px] uppercase font-bold text-[#6E6960] dark:text-[#7C8797] mt-0.5">
+                  Total
+                </span>
               </div>
-              <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                Calculated strictly from Revision Date &gt; configured threshold
-              </span>
             </div>
 
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {needsReviewAssets.length === 0 ? (
-                <div className="p-6 text-center text-xs text-slate-400 dark:text-slate-500">
-                  All active assets are within their compliance revision period.
-                </div>
-              ) : (
-                needsReviewAssets.slice(0, 4).map((asset) => (
-                  <div
-                    key={asset.assetNumber}
-                    onClick={() => {
-                      setSelectedAssetNumber(asset.assetNumber);
-                      setActiveView('assets');
-                    }}
-                    className="p-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer transition-colors"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-semibold text-slate-900 dark:text-white">
-                          {asset.assetNumber}
-                        </span>
-                        <span className="text-slate-400">·</span>
-                        <span className="text-xs text-slate-700 dark:text-slate-300 font-medium">
-                          {asset.model} ({asset.type})
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                        <span>Last Revision: {new Date(asset.revision).toLocaleDateString()}</span>
-                        <span>·</span>
-                        <span>Assignee: {asset.currentUserName || 'Unassigned Stock'}</span>
-                        <span>·</span>
-                        <span>AC Owner: {asset.acOwner}</span>
-                      </div>
-                    </div>
-                    <span className="text-xs font-medium text-rose-600 dark:text-rose-400 flex items-center gap-1">
-                      Inspect
-                      <ArrowRight className="h-3 w-3" />
-                    </span>
-                  </div>
-                ))
-              )}
+            {/* Legend matching Reference */}
+            <div className="space-y-2.5 font-mono-tabular text-xs">
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full bg-[#5D7F5F] dark:bg-[#668768] shrink-0" />
+                <span className="text-[#6E6960] dark:text-[#7C8797] font-medium">In Use</span>
+                <span className="font-bold text-[#141312] dark:text-[#F2EFE9] ml-auto">
+                  {inUseCount} ({inUsePercent}%)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full bg-[#E49C52] dark:bg-[#E7A45F] shrink-0" />
+                <span className="text-[#6E6960] dark:text-[#7C8797] font-medium">Available</span>
+                <span className="font-bold text-[#141312] dark:text-[#F2EFE9] ml-auto">
+                  {spareCount} ({sparePercent}%)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full bg-[#B2534C] dark:bg-[#B85D56] shrink-0" />
+                <span className="text-[#6E6960] dark:text-[#7C8797] font-medium">Audit / Disp</span>
+                <span className="font-bold text-[#141312] dark:text-[#F2EFE9] ml-auto">
+                  {maintenanceCount} ({maintenancePercent}%)
+                </span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Right Column (1 span): Recent Audit Timeline */}
-        <div className="space-y-6">
-          <div className="rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900 p-4.5 transition-colors">
-            <h2 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-4 flex items-center justify-between">
-              <span>Recent Transaction Log</span>
-              <span className="text-[10px] font-normal text-slate-400">Handovers &amp; Returns</span>
-            </h2>
-
-            <div className="space-y-4">
-              {recentActivities.map((act) => (
-                <div key={act.id} className="relative pl-5 border-l-2 border-slate-200 dark:border-slate-800">
-                  <div
-                    className={`absolute -left-[5px] top-1 h-2 w-2 rounded-full ${
-                      act.kind === 'handover' ? 'bg-blue-600' : 'bg-emerald-600'
-                    }`}
-                  />
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-900 dark:text-white">
-                      {act.title}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {new Date(act.date).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
-                    {act.desc}
-                  </p>
-                  <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-500">
-                    <span>By: {act.itUser}</span>
-                    <span>·</span>
-                    <span>Condition: {act.condition}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+        {/* Center: Recent Activities (4 cols) */}
+        <div className="lg:col-span-4 rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] p-4.5 dark:border-[#2B323D] dark:bg-[#12151B] flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-industrial-display text-sm font-black uppercase tracking-wider text-[#141312] dark:text-[#F2EFE9]">
+              Recent Activities
+            </h3>
+            <button
+              onClick={() => setActiveView('reports')}
+              className="text-[11px] font-bold font-mono-tabular text-[#E49C52] dark:text-[#E7A45F] hover:underline flex items-center gap-1"
+            >
+              <span>View All</span>
+              <span>→</span>
+            </button>
           </div>
 
-          {/* Quick Mock Notice Box */}
-          <div className="rounded-xl border border-blue-200/70 bg-blue-50/50 p-4 text-xs text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-300">
-            <p className="font-semibold flex items-center gap-1.5">
-              <Sparkles className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-              REST API Ready Architecture
-            </p>
-            <p className="mt-1 text-[11px] text-blue-800/80 dark:text-blue-300/80 leading-relaxed">
-              This dashboard is powered by an asynchronous client abstraction (`src/services/assetService.ts`).
-              It will seamlessly connect to the Python FastAPI backend and PostgreSQL database without modifying UI components.
-            </p>
+          <div className="space-y-3.5 my-auto">
+            {recentActivities.map((act) => (
+              <div key={act.id} className="flex items-start gap-3">
+                {/* Timeline Dot matching Reference */}
+                <div className="mt-1 flex flex-col items-center">
+                  <span
+                    className={`h-2.5 w-2.5 rounded-full ring-2 ring-[#F8F4EC] dark:ring-[#12151B] ${
+                      act.kind === 'handover'
+                        ? 'bg-[#E49C52] dark:bg-[#E7A45F]'
+                        : 'bg-[#5D7F5F] dark:bg-[#668768]'
+                    }`}
+                  />
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="truncate text-xs font-bold text-[#141312] dark:text-[#F2EFE9]">
+                      {act.title}
+                    </p>
+                    <span className="font-mono-tabular text-[10px] text-[#6E6960] dark:text-[#7C8797] shrink-0">
+                      {new Date(act.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <p className="truncate text-[11px] text-[#6E6960] dark:text-[#7C8797]">
+                    {act.desc}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Right: Compact Decorative Industrial Equipment Showcase (4 cols) */}
+        <div className="lg:col-span-4 rounded-lg border border-[#D2C8B8] dark:border-[#2B323D] overflow-hidden flex flex-row shadow-sm min-h-[160px]">
+          {/* Left half: Industrial Equipment Imagery from reference asset */}
+          <div className="relative w-1/2 bg-[#12151B] overflow-hidden">
+            <img
+              src="/assets/aistudio/193131f3-d455-47df-8ad4-1a0eac305b1a_ff079029.png"
+              alt="Industrial Machinery Showcase"
+              className="h-full w-full object-cover object-left opacity-90 contrast-125"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-black/30" />
+          </div>
+
+          {/* Right half: Solid Color Panel matching Reference Image */}
+          <div className="w-1/2 bg-[#B2534C] dark:bg-[#B85D56] text-black p-4 flex flex-col justify-between relative">
+            <div>
+              <span className="font-mono-tabular text-[9px] font-bold tracking-widest uppercase opacity-80 block">
+                /// FLEET CONSOLE
+              </span>
+              <h4 className="font-industrial-display font-black text-sm uppercase tracking-tight leading-tight mt-1">
+                IT ASSET MANAGEMENT
+              </h4>
+            </div>
+
+            <div className="space-y-0.5 text-xs font-bold font-industrial-display opacity-95">
+              <p>Track.</p>
+              <p>Manage.</p>
+              <p>Optimize.</p>
+            </div>
+
+            {/* Corner Hazard Stripes */}
+            <div className="self-end h-3 w-14 hazard-stripes-amber opacity-90 rounded-xs" />
+          </div>
+        </div>
+      </div>
+
+      {/* Operational Attention Queues */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+        {/* 1. Pending Handover Confirmations with the critical "Confirm Receipt" Action */}
+        <div className="rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] dark:border-[#2B323D] dark:bg-[#12151B] overflow-hidden">
+          <div className="flex items-center justify-between border-b border-[#D2C8B8] p-3.5 dark:border-[#2B323D] bg-[#E5DFD2]/40 dark:bg-[#181C24]">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-[#744D7E] dark:bg-[#7A5884]" />
+              <h2 className="font-industrial-display text-xs font-black uppercase tracking-wider text-[#141312] dark:text-[#F2EFE9]">
+                Pending Confirmations ({pendingHandovers.length})
+              </h2>
+            </div>
+            <span className="font-mono-tabular text-[10px] text-[#6E6960] dark:text-[#7C8797]">
+              EMPLOYEE SIGN-OFF REQUIRED
+            </span>
+          </div>
+
+          <div className="divide-y divide-[#D2C8B8] dark:divide-[#2B323D]">
+            {pendingHandovers.length === 0 ? (
+              <div className="p-6 text-center text-xs font-mono-tabular text-[#6E6960] dark:text-[#7C8797]">
+                All active handovers verified. Zero pending sign-offs.
+              </div>
+            ) : (
+              pendingHandovers.map((h) => (
+                <div key={h.id} className="p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono-tabular text-xs font-bold text-[#141312] dark:text-[#F2EFE9] bg-[#E5DFD2] dark:bg-[#181C24] px-1.5 py-0.5 rounded border border-[#D2C8B8] dark:border-[#2B323D]">
+                        {h.assetNumber}
+                      </span>
+                      <span className="text-xs font-semibold text-[#141312] dark:text-[#F2EFE9]">
+                        {h.employeeName} ({h.personalCode})
+                      </span>
+                      <span className="text-[10px] font-mono-tabular font-bold px-1.5 py-0.2 rounded bg-[#744D7E]/15 text-[#744D7E] dark:bg-[#7A5884]/30 dark:text-[#C5A4D0]">
+                        {h.type}
+                      </span>
+                    </div>
+                    <p className="text-[11px] font-mono-tabular text-[#6E6960] dark:text-[#7C8797]">
+                      Dispatched by {h.itUserName} · Condition: <strong>{h.condition}</strong>
+                    </p>
+                  </div>
+
+                  {/* Preserved "Confirm Receipt" Action Button */}
+                  <div className="shrink-0 self-end sm:self-center">
+                    <button
+                      onClick={() => handleConfirmReceipt(h.id)}
+                      disabled={confirmingId === h.id}
+                      className="rounded bg-[#744D7E] dark:bg-[#7A5884] text-white px-3 py-1.5 text-xs font-bold font-industrial-display shadow-xs hover:brightness-110 disabled:opacity-50 transition-all flex items-center gap-1.5"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>{confirmingId === h.id ? 'Confirming...' : 'Confirm Receipt'}</span>
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* 2. Assets Needing Revision (> 6 months) */}
+        <div className="rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] dark:border-[#2B323D] dark:bg-[#12151B] overflow-hidden">
+          <div className="flex items-center justify-between border-b border-[#D2C8B8] p-3.5 dark:border-[#2B323D] bg-[#E5DFD2]/40 dark:bg-[#181C24]">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-[#B2534C] dark:bg-[#B85D56]" />
+              <h2 className="font-industrial-display text-xs font-black uppercase tracking-wider text-[#141312] dark:text-[#F2EFE9]">
+                Assets Needing Revision ({needsReviewAssets.length})
+              </h2>
+            </div>
+            <span className="font-mono-tabular text-[10px] text-[#6E6960] dark:text-[#7C8797]">
+              REVISION &gt; 6 MONTHS
+            </span>
+          </div>
+
+          <div className="divide-y divide-[#D2C8B8] dark:divide-[#2B323D]">
+            {needsReviewAssets.length === 0 ? (
+              <div className="p-6 text-center text-xs font-mono-tabular text-[#6E6960] dark:text-[#7C8797]">
+                All assets conform to compliance schedule. Zero overdue revisions.
+              </div>
+            ) : (
+              needsReviewAssets.slice(0, 3).map((asset) => (
+                <div
+                  key={asset.assetNumber}
+                  onClick={() => {
+                    setSelectedAssetNumber(asset.assetNumber);
+                    setActiveView('assets');
+                  }}
+                  className="p-3.5 flex items-center justify-between hover:bg-[#E5DFD2]/50 dark:hover:bg-[#181C24]/60 cursor-pointer transition-colors"
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono-tabular text-xs font-bold text-[#141312] dark:text-[#F2EFE9]">
+                        {asset.assetNumber}
+                      </span>
+                      <span className="text-xs text-[#6E6960] dark:text-[#7C8797]">
+                        {asset.model} ({asset.type})
+                      </span>
+                    </div>
+                    <p className="text-[11px] font-mono-tabular text-[#6E6960] dark:text-[#7C8797]">
+                      Last Revision: {new Date(asset.revision).toLocaleDateString()} · Assignee: {asset.currentUserName || 'Stock'}
+                    </p>
+                  </div>
+
+                  <span className="text-xs font-bold text-[#B2534C] dark:text-[#B85D56] font-mono-tabular flex items-center gap-1">
+                    Inspect →
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

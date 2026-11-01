@@ -1,7 +1,7 @@
 /**
- * IT Asset Management - Excel Import Wizard
- * Strictly processes Excel files (.xlsx / .xls) with client-side parsing, schema validation,
- * mandatory duplicate rejection (Asset Number & Serial Number), and row preview.
+ * IT Asset Management - Excel Import Wizard (Industrial Redesign)
+ * Binary .xlsx parsing, 15-field schema validation, unconditional duplicate rejection,
+ * and high-contrast validation inspection grid.
  */
 
 import React, { useState } from 'react';
@@ -74,10 +74,9 @@ export const ImportView: React.FC = () => {
     setImportSummary(null);
 
     try {
-      // Simulate raw buffer from template generator
       const existingAssets = await assetService.getAssets();
 
-      // Create a test workbook array with 1 valid row, 1 duplicate serial row, and 1 invalid status row
+      // Demo dataset with valid row and duplicate detection
       const demoRows = [
         {
           assetNumber: 'AST-2025-0881',
@@ -100,50 +99,46 @@ export const ImportView: React.FC = () => {
           assetNumber: 'AST-2025-0882',
           revision: new Date().toISOString(),
           type: 'Monitor',
-          acOwner: 'Corporate Lease Fleet BV',
-          personalCode: '',
-          currentUserName: '',
-          department: 'Corporate IT Stock',
-          cc: 'CC-IT-100',
+          acOwner: 'Global IT Holdings Entity A1',
+          personalCode: 'PC-10042',
+          currentUserName: 'Ali Rezaei',
+          department: 'Technology Infrastructure',
+          cc: 'CC-TECH-101',
           eFormNumber: 'EF-2025-0882',
-          model: 'LG 38WN95C-W Curved Ultrawide',
+          model: 'Dell UltraSharp U2723QE',
           label: 'Yes' as const,
-          serialNumber: 'SN-TP-892014-X', // DUPLICATE OF EXISTING ASSET!
-          status: 'Spare' as const,
-          location: 'IT Stockroom - Central',
-          comment: 'Spare curved monitor',
+          serialNumber: 'SN-MON-DELL-8820',
+          status: 'In Use' as const,
+          location: 'Building B - Tech Lab',
+          comment: 'Secondary 4K display',
         },
         {
-          assetNumber: 'AST-2025-0883',
+          // Intentional duplicate of existing assetNumber to demo rejection
+          assetNumber: existingAssets[0]?.assetNumber || 'LAP-2024-001',
           revision: new Date().toISOString(),
-          type: 'Phone',
-          acOwner: 'Audit Asset Trust DE-88',
-          personalCode: '',
-          currentUserName: '',
-          department: 'Corporate IT Stock',
-          cc: 'CC-IT-100',
-          eFormNumber: 'EF-2025-0883',
-          model: 'Samsung Galaxy S24 Ultra',
-          label: 'Maybe' as any, // INVALID LABEL!
-          serialNumber: 'SN-SAMS-S24U-990',
-          status: 'Under Repair' as any, // INVALID STATUS (must be In Use, Spare, Disposed)!
-          location: 'HQ Lab',
-          comment: '',
+          type: 'Laptop',
+          acOwner: 'Corporate Fleet Holdings',
+          personalCode: 'PC-99999',
+          currentUserName: 'Duplicate Test',
+          department: 'Finance',
+          cc: 'CC-FIN-200',
+          eFormNumber: 'EF-DUP-001',
+          model: 'Test Duplicate Unit',
+          label: 'Yes' as const,
+          serialNumber: 'SN-DUP-TEST-0001',
+          status: 'Spare' as const,
+          location: 'IT Stockroom 101',
+          comment: 'This row should be rejected by duplicate check',
         },
       ];
 
-      // Format as ParseResult
       const rows = demoRows.map((data, idx) => {
         const errors: string[] = [];
-        if (data.serialNumber === 'SN-TP-892014-X') {
-          errors.push("Duplicate Serial Number 'SN-TP-892014-X' (already exists in inventory)");
-        }
-        if ((data.status as string) === 'Under Repair') {
-          errors.push("Invalid Status 'Under Repair'. Must be exactly 'In Use', 'Spare', or 'Disposed'");
-        }
-        if ((data.label as string) === 'Maybe') {
-          errors.push("Invalid Label 'Maybe'. Must be exactly 'Yes' or 'No'");
-        }
+        const isDupAsset = existingAssets.some((a) => a.assetNumber === data.assetNumber);
+        const isDupSerial = existingAssets.some((a) => a.serialNumber === data.serialNumber);
+
+        if (isDupAsset) errors.push(`Duplicate Asset Number "${data.assetNumber}" already exists in registry.`);
+        if (isDupSerial) errors.push(`Duplicate Serial Number "${data.serialNumber}" already exists.`);
 
         return {
           rowNumber: idx + 2,
@@ -161,21 +156,9 @@ export const ImportView: React.FC = () => {
         invalidRowsCount: rows.filter((r) => !r.isValid).length,
         rows,
         headersFound: [
-          'Asset Number',
-          'Revision',
-          'Type',
-          'AC Owner',
-          'Personal Code',
-          'Current User Name',
-          'Department',
-          'CC',
-          'eForm Number',
-          'Model',
-          'Label',
-          'Serial Number',
-          'Status',
-          'Location',
-          'Comment',
+          'Asset Number', 'Revision', 'Type', 'AC Owner', 'Personal Code',
+          'Current User Name', 'Department', 'CC', 'eForm Number', 'Model',
+          'Label', 'Serial Number', 'Status', 'Location', 'Comment',
         ],
         missingHeaders: [],
       });
@@ -206,40 +189,39 @@ export const ImportView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header Info Banner */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4.5 shadow-xs dark:border-slate-800 dark:bg-slate-900 transition-colors">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] p-3.5 dark:border-[#2B323D] dark:bg-[#12151B]">
         <div>
-          <h1 className="text-base font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-            <FileSpreadsheet className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-            Excel Asset Import Engine
+          <h1 className="font-industrial-display text-base font-black uppercase tracking-tight text-[#141312] dark:text-[#F2EFE9] flex items-center gap-2">
+            <FileSpreadsheet className="h-5 w-5 text-[#5D7F5F] dark:text-[#668768]" />
+            EXCEL BATCH INGEST ENGINE
           </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Batch onboard enterprise equipment using Excel spreadsheets (.xlsx / .xls). Strict validation ensures
-            all 15 approved fields match standards and unconditionally prevents duplicate Asset Numbers or Serial Numbers.
+          <p className="text-xs text-[#6E6960] dark:text-[#7C8797] font-medium mt-0.5">
+            Strict 15-field validation with mandatory duplicate detection for Asset Numbers and Serial Numbers.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={generateSampleExcelTemplate}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 transition-colors"
+            className="flex items-center gap-1.5 rounded border border-[#D2C8B8] bg-[#E5DFD2] px-3 py-1.5 text-xs font-bold font-industrial-display text-[#141312] hover:bg-[#DCD4C4] dark:border-[#2B323D] dark:bg-[#181C24] dark:text-[#F2EFE9] dark:hover:bg-[#202530] transition-colors"
           >
-            <Download className="h-4 w-4" />
-            <span>Download Template (.xlsx)</span>
+            <Download className="h-3.5 w-3.5" />
+            <span>DOWNLOAD TEMPLATE (.XLSX)</span>
           </button>
           <button
             onClick={handleLoadSampleDemo}
-            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors"
+            className="flex items-center gap-1.5 rounded bg-[#E49C52] text-black dark:bg-[#E7A45F] dark:text-black px-3.5 py-1.5 text-xs font-bold font-industrial-display shadow-xs hover:brightness-105 transition-all"
           >
-            <Sparkles className="h-4 w-4" />
-            <span>Load Demo Batch</span>
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>LOAD DEMO BATCH</span>
           </button>
         </div>
       </div>
 
       {errorBanner && (
-        <div className="flex items-center gap-2 rounded-xl bg-red-50 p-4 text-xs text-red-700 dark:bg-red-950/50 dark:text-red-300 border border-red-200 dark:border-red-900">
-          <AlertCircle className="h-5 w-5 shrink-0" />
+        <div className="flex items-center gap-2 rounded-lg bg-[#B2534C]/15 p-3 text-xs text-[#B2534C] dark:text-[#E28882] border border-[#B2534C] font-mono-tabular">
+          <AlertCircle className="h-4 w-4 shrink-0" />
           <span>{errorBanner}</span>
         </div>
       )}
@@ -253,24 +235,24 @@ export const ImportView: React.FC = () => {
           }}
           onDragLeave={() => setDragActive(false)}
           onDrop={handleDrop}
-          className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-12 text-center transition-all ${
+          className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-10 text-center transition-all ${
             dragActive
-              ? 'border-blue-500 bg-blue-50/50 dark:border-blue-400 dark:bg-blue-950/20'
-              : 'border-slate-300 bg-white hover:border-slate-400 dark:border-slate-800 dark:bg-slate-900/60'
+              ? 'border-[#E49C52] bg-[#E5DFD2] dark:border-[#E7A45F] dark:bg-[#181C24]'
+              : 'border-[#D2C8B8] bg-[#F8F4EC] dark:border-[#2B323D] dark:bg-[#12151B]'
           }`}
         >
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 mb-4 shadow-xs">
-            <Upload className="h-7 w-7" />
+          <div className="flex h-12 w-12 items-center justify-center rounded bg-[#E5DFD2] text-[#141312] dark:bg-[#181C24] dark:text-[#F2EFE9] mb-3">
+            <Upload className="h-6 w-6" />
           </div>
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-            Drag and drop your Excel workbook here
+          <h3 className="font-industrial-display text-sm font-black uppercase text-[#141312] dark:text-[#F2EFE9]">
+            DRAG &amp; DROP EXCEL WORKBOOK (.XLSX / .XLS)
           </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm">
-            Supports Microsoft Excel <strong>.xlsx</strong> and <strong>.xls</strong> workbooks containing the 15 approved Asset fields.
+          <p className="text-xs font-mono-tabular text-[#6E6960] dark:text-[#7C8797] mt-1 max-w-sm">
+            Must contain approved 15-field header schema. Duplicates are unconditionally flagged.
           </p>
 
-          <label className="mt-5 inline-flex cursor-pointer items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors">
-            <span>Browse Computer</span>
+          <label className="mt-4 inline-flex cursor-pointer items-center justify-center rounded bg-[#141312] text-[#F8F4EC] dark:bg-[#F2EFE9] dark:text-[#12151B] px-4 py-2 text-xs font-bold font-industrial-display shadow-xs hover:opacity-90 transition-all">
+            <span>BROWSE LOCAL FILES</span>
             <input
               type="file"
               accept=".xlsx,.xls"
@@ -285,13 +267,12 @@ export const ImportView: React.FC = () => {
         </div>
       )}
 
-      {/* Parsing progress spinner */}
+      {/* Parsing progress */}
       {isParsing && (
-        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900">
-          <p className="font-semibold text-slate-800 dark:text-slate-200">
-            Reading Excel workbook and validating schema...
+        <div className="rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] p-8 text-center text-xs font-mono-tabular text-[#6E6960] dark:border-[#2B323D] dark:bg-[#12151B] dark:text-[#7C8797]">
+          <p className="font-bold text-[#141312] dark:text-[#F2EFE9]">
+            PROCESSING BINARY SPREADSHEET &amp; CHECKING DUPLICATES...
           </p>
-          <p className="mt-1">Detecting duplicate Asset Numbers &amp; Serial Numbers</p>
         </div>
       )}
 
@@ -299,118 +280,81 @@ export const ImportView: React.FC = () => {
       {parseResult && (
         <div className="space-y-4">
           {/* Summary Metric Ribbon */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
-              <span className="text-[11px] font-medium text-slate-400">Workbook Name</span>
-              <p className="font-mono text-xs font-bold text-slate-800 dark:text-slate-200 mt-1 truncate">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 font-mono-tabular">
+            <div className="rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] p-3 dark:border-[#2B323D] dark:bg-[#12151B]">
+              <span className="text-[10px] uppercase font-bold text-[#6E6960] dark:text-[#7C8797]">FILE NAME</span>
+              <p className="font-bold text-xs text-[#141312] dark:text-[#F2EFE9] mt-1 truncate">
                 {parseResult.fileName}
               </p>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
-              <span className="text-[11px] font-medium text-slate-400">Total Rows Found</span>
-              <p className="font-mono text-xl font-bold text-slate-900 dark:text-white mt-0.5 tabular-nums">
+            <div className="rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] p-3 dark:border-[#2B323D] dark:bg-[#12151B]">
+              <span className="text-[10px] uppercase font-bold text-[#6E6960] dark:text-[#7C8797]">TOTAL ROWS</span>
+              <p className="font-industrial-display text-2xl font-black text-[#141312] dark:text-[#F2EFE9] mt-0.5">
                 {parseResult.totalRows}
               </p>
             </div>
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-3.5 shadow-xs dark:border-emerald-900/40 dark:bg-emerald-950/20">
-              <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
-                Valid Rows (Ready to Import)
-              </span>
-              <p className="font-mono text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-0.5 tabular-nums">
+            <div className="rounded-lg border border-[#5D7F5F] bg-[#5D7F5F]/15 p-3 dark:border-[#668768] dark:bg-[#668768]/15">
+              <span className="text-[10px] uppercase font-bold text-[#5D7F5F] dark:text-[#668768]">VALID ROWS</span>
+              <p className="font-industrial-display text-2xl font-black text-[#5D7F5F] dark:text-[#668768] mt-0.5">
                 {parseResult.validRowsCount}
               </p>
             </div>
-            <div className="rounded-xl border border-rose-200 bg-rose-50/30 p-3.5 shadow-xs dark:border-rose-900/40 dark:bg-rose-950/20">
-              <span className="text-[11px] font-semibold text-rose-800 dark:text-rose-300">
-                Invalid / Duplicate Rows
-              </span>
-              <p className="font-mono text-xl font-bold text-rose-600 dark:text-rose-400 mt-0.5 tabular-nums">
+            <div className="rounded-lg border border-[#B2534C] bg-[#B2534C]/15 p-3 dark:border-[#B85D56] dark:bg-[#B85D56]/15">
+              <span className="text-[10px] uppercase font-bold text-[#B2534C] dark:text-[#B85D56]">INVALID / DUPLICATES</span>
+              <p className="font-industrial-display text-2xl font-black text-[#B2534C] dark:text-[#B85D56] mt-0.5">
                 {parseResult.invalidRowsCount}
               </p>
             </div>
           </div>
 
           {/* Validation Table */}
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900 transition-colors">
-            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/60">
-              <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                Parsed Rows Preview &amp; Validation Status
+          <div className="overflow-hidden rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] dark:border-[#2B323D] dark:bg-[#12151B]">
+            <div className="flex items-center justify-between border-b border-[#D2C8B8] bg-[#E5DFD2] px-4 py-2.5 dark:border-[#2B323D] dark:bg-[#181C24]">
+              <span className="font-industrial-display text-xs font-black uppercase tracking-wider text-[#141312] dark:text-[#F2EFE9]">
+                BATCH VALIDATION LOG
               </span>
               <button
                 onClick={() => setParseResult(null)}
-                className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 font-medium"
+                className="font-mono-tabular text-xs font-bold text-[#6E6960] hover:text-[#141312] dark:text-[#7C8797] dark:hover:text-[#F2EFE9]"
               >
-                Upload Different File
+                RESET / UPLOAD ANOTHER
               </button>
             </div>
 
-            <div className="overflow-x-auto max-h-96">
+            <div className="overflow-x-auto max-h-80 font-mono-tabular">
               <table className="w-full text-left text-xs whitespace-nowrap">
-                <thead className="border-b border-slate-200 bg-slate-50 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:bg-slate-800 dark:text-slate-400 sticky top-0">
+                <thead className="border-b border-[#D2C8B8] bg-[#E5DFD2] text-[10px] font-bold uppercase text-[#6E6960] dark:border-[#2B323D] dark:bg-[#181C24] dark:text-[#7C8797] sticky top-0">
                   <tr>
-                    <th scope="col" className="py-2.5 px-3">Row #</th>
-                    <th scope="col" className="py-2.5 px-3">Validation Status</th>
-                    <th scope="col" className="py-2.5 px-3">Asset Number</th>
-                    <th scope="col" className="py-2.5 px-3">Model</th>
-                    <th scope="col" className="py-2.5 px-3">Serial Number</th>
-                    <th scope="col" className="py-2.5 px-3">AC Owner</th>
-                    <th scope="col" className="py-2.5 px-3">Status</th>
-                    <th scope="col" className="py-2.5 px-3">Label</th>
-                    <th scope="col" className="py-2.5 px-3">Validation Errors / Reason</th>
+                    <th className="py-2 px-3">ROW</th>
+                    <th className="py-2 px-3">VALIDATION</th>
+                    <th className="py-2 px-3">ASSET NUMBER</th>
+                    <th className="py-2 px-3">SERIAL NUMBER</th>
+                    <th className="py-2 px-3">MODEL</th>
+                    <th className="py-2 px-3">STATUS</th>
+                    <th className="py-2 px-3">REASON / ERRORS</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                <tbody className="divide-y divide-[#D2C8B8] dark:divide-[#2B323D] text-[#141312] dark:text-[#F2EFE9]">
                   {parseResult.rows.map((row) => (
-                    <tr
-                      key={row.rowNumber}
-                      className={row.isValid ? 'bg-white dark:bg-slate-900' : 'bg-rose-50/30 dark:bg-rose-950/10'}
-                    >
-                      <td className="py-2.5 px-3 font-mono text-slate-400">#{row.rowNumber}</td>
-                      <td className="py-2.5 px-3">
-                        {row.isValid ? (
-                          <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                            <CheckCircle2 className="h-3 w-3" />
-                            Valid
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-950 dark:text-rose-300">
-                            <AlertTriangle className="h-3 w-3" />
-                            Invalid
-                          </span>
-                        )}
+                    <tr key={row.rowNumber} className={row.isValid ? '' : 'bg-[#B2534C]/5 dark:bg-[#B85D56]/5'}>
+                      <td className="py-2 px-3 font-bold">{row.rowNumber}</td>
+                      <td className="py-2 px-3">
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                            row.isValid
+                              ? 'bg-[#5D7F5F] text-black dark:bg-[#668768] dark:text-black'
+                              : 'bg-[#B2534C] text-black dark:bg-[#B85D56] dark:text-black'
+                          }`}
+                        >
+                          {row.isValid ? 'VALID' : 'REJECTED'}
+                        </span>
                       </td>
-                      <td className="py-2.5 px-3 font-mono font-semibold text-slate-800 dark:text-slate-200">
-                        {row.data.assetNumber || '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">
-                        {row.data.model || '—'}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono text-slate-600 dark:text-slate-400">
-                        {row.data.serialNumber || '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">
-                        {row.data.acOwner || '—'}
-                      </td>
-                      <td className="py-2.5 px-3 font-medium">
-                        {row.data.status || '—'}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        {row.data.label || '—'}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        {row.errors.length === 0 ? (
-                          <span className="text-emerald-600 dark:text-emerald-400 text-[11px]">
-                            Ready to import
-                          </span>
-                        ) : (
-                          <div className="flex flex-col gap-0.5">
-                            {row.errors.map((err, i) => (
-                              <span key={i} className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
-                                • {err}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                      <td className="py-2 px-3 font-bold">{row.data.assetNumber || '—'}</td>
+                      <td className="py-2 px-3">{row.data.serialNumber || '—'}</td>
+                      <td className="py-2 px-3">{row.data.model || '—'}</td>
+                      <td className="py-2 px-3">{row.data.status || '—'}</td>
+                      <td className="py-2 px-3 text-[#B2534C] dark:text-[#E28882]">
+                        {row.errors.length > 0 ? row.errors.join('; ') : 'Passed all checks'}
                       </td>
                     </tr>
                   ))}
@@ -418,68 +362,37 @@ export const ImportView: React.FC = () => {
               </table>
             </div>
 
-            {/* Commit Footer */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-800/60">
-              <div className="text-xs text-slate-600 dark:text-slate-400">
-                {parseResult.validRowsCount > 0 ? (
-                  <span>
-                    Ready to onboard <strong>{parseResult.validRowsCount}</strong> verified assets into inventory.
-                    Invalid rows will be skipped.
-                  </span>
-                ) : (
-                  <span className="text-rose-600 dark:text-rose-400 font-medium">
-                    No valid rows found to import. Please correct spreadsheet errors and retry.
-                  </span>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setParseResult(null)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmImport}
-                  disabled={parseResult.validRowsCount === 0 || isImporting}
-                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600 disabled:opacity-50 transition-colors"
-                >
-                  <FileCheck className="h-4 w-4" />
-                  <span>
-                    {isImporting
-                      ? 'Importing...'
-                      : `Confirm & Import ${parseResult.validRowsCount} Valid Rows`}
-                  </span>
-                </button>
-              </div>
+            {/* Commit Import Bar */}
+            <div className="flex items-center justify-between border-t border-[#D2C8B8] bg-[#E5DFD2] p-3.5 dark:border-[#2B323D] dark:bg-[#181C24]">
+              <span className="font-mono-tabular text-xs text-[#6E6960] dark:text-[#7C8797]">
+                {parseResult.validRowsCount} valid units ready to commit to registry.
+              </span>
+              <button
+                onClick={handleConfirmImport}
+                disabled={parseResult.validRowsCount === 0 || isImporting}
+                className="rounded bg-[#5D7F5F] text-black dark:bg-[#668768] dark:text-black px-4 py-2 text-xs font-black font-industrial-display shadow-xs hover:brightness-105 disabled:opacity-40 transition-all"
+              >
+                {isImporting ? 'COMMITTING...' : `COMMIT ${parseResult.validRowsCount} ASSETS`}
+              </button>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* Success Notification */}
-      {importSummary && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-5 dark:border-emerald-900/40 dark:bg-emerald-950/30 text-xs text-emerald-900 dark:text-emerald-300 space-y-2">
-          <div className="flex items-center gap-2 text-sm font-bold text-emerald-800 dark:text-emerald-200">
-            <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-            Batch Import Successful!
-          </div>
-          <p>
-            Successfully imported <strong>{importSummary.imported}</strong> valid hardware assets into inventory.
-            {importSummary.rejected > 0 && ` (${importSummary.rejected} invalid/duplicate rows were skipped).`}
-          </p>
-          <div className="pt-2">
-            <button
-              onClick={() => setActiveView('assets')}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 transition-colors"
-            >
-              <span>View Updated Inventory in Assets</span>
-              <ArrowRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
+          {importSummary && (
+            <div className="rounded-lg border border-[#5D7F5F] bg-[#5D7F5F]/15 p-4 font-mono-tabular text-xs text-[#141312] dark:text-[#F2EFE9] flex items-center justify-between">
+              <div>
+                <p className="font-bold">IMPORT BATCH COMPLETED SUCCESSFULLY</p>
+                <p className="text-[11px] mt-0.5">
+                  Imported {importSummary.imported} records · Rejected {importSummary.rejected} duplicates
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveView('assets')}
+                className="rounded bg-[#141312] text-[#F8F4EC] dark:bg-[#F2EFE9] dark:text-[#12151B] px-3 py-1.5 font-bold font-industrial-display"
+              >
+                VIEW REGISTRY →
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

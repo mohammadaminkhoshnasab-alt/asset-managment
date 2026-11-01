@@ -1,5 +1,5 @@
 /**
- * IT Asset Management - Employee Directory View
+ * IT Asset Management - Employee Directory View (Industrial Neo-Brutalist Redesign)
  * Showcases all 9 approved employee fields and an assigned hardware inspection drawer.
  */
 
@@ -17,6 +17,7 @@ import {
   Layers,
   MapPin,
   ArrowRight,
+  Eye,
 } from 'lucide-react';
 import { Asset, Employee } from '../../types/asset.ts';
 import { assetService } from '../../services/assetService.ts';
@@ -64,7 +65,6 @@ export const EmployeesView: React.FC = () => {
     return true;
   });
 
-  // Get currently assigned assets for an employee (excludes returned devices, as personalCode is cleared)
   const getAssignedAssets = (personalCode: string) => {
     return assets.filter((a) => a.personalCode === personalCode && a.status === 'In Use');
   };
@@ -72,26 +72,26 @@ export const EmployeesView: React.FC = () => {
   return (
     <div className="space-y-4">
       {/* Search and Filter Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900 transition-colors">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] p-3.5 dark:border-[#2B323D] dark:bg-[#12151B]">
         <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[#6E6960] dark:text-[#7C8797]" />
           <input
             type="text"
             placeholder="Search by Employee Name, Personal Code, Job Title, Direct Manager, Site..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-4 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            className="w-full rounded border border-[#D2C8B8] bg-[#E5DFD2]/60 py-2 pl-9 pr-4 text-xs font-mono-tabular text-[#141312] placeholder-[#6E6960] focus:border-[#E49C52] focus:bg-[#F8F4EC] focus:outline-none dark:border-[#2B323D] dark:bg-[#181C24] dark:text-[#F2EFE9] dark:placeholder-[#7C8797]"
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-slate-400">Department:</label>
+        <div className="flex items-center gap-2 font-mono-tabular text-xs">
+          <label className="text-[#6E6960] dark:text-[#7C8797] uppercase">Department:</label>
           <select
             value={deptFilter}
             onChange={(e) => setDeptFilter(e.target.value)}
-            className="rounded-lg border border-slate-200 bg-white py-1.5 px-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            className="rounded border border-[#D2C8B8] bg-[#E5DFD2] py-1 px-2.5 text-xs text-[#141312] dark:border-[#2B323D] dark:bg-[#181C24] dark:text-[#F2EFE9] focus:outline-none"
           >
-            <option value="All">All Departments</option>
+            <option value="All">ALL DEPARTMENTS ({uniqueDepartments.length})</option>
             {uniqueDepartments.map((d) => (
               <option key={d} value={d}>
                 {d}
@@ -102,28 +102,28 @@ export const EmployeesView: React.FC = () => {
       </div>
 
       {/* 9-Field Employee Table */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900 transition-colors">
+      <div className="overflow-hidden rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] dark:border-[#2B323D] dark:bg-[#12151B]">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs whitespace-nowrap">
-            <thead className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-400">
+            <thead className="border-b border-[#D2C8B8] bg-[#E5DFD2] text-[11px] font-industrial-display font-black uppercase tracking-wider text-[#6E6960] dark:border-[#2B323D] dark:bg-[#181C24] dark:text-[#7C8797]">
               <tr>
-                <th scope="col" className="py-3 px-4">Employee Name</th>
-                <th scope="col" className="py-3 px-3">Personal Code</th>
-                <th scope="col" className="py-3 px-3">Job Title</th>
-                <th scope="col" className="py-3 px-3">Department</th>
-                <th scope="col" className="py-3 px-3">Work Group</th>
-                <th scope="col" className="py-3 px-3">Site / Facility</th>
-                <th scope="col" className="py-3 px-3">Direct Manager</th>
-                <th scope="col" className="py-3 px-3">Mobile Number</th>
-                <th scope="col" className="py-3 px-3 text-center">Assigned Devices</th>
-                <th scope="col" className="py-3 px-4 text-right">Details</th>
+                <th scope="col" className="py-3 px-3.5">1. EMPLOYEE NAME</th>
+                <th scope="col" className="py-3 px-3">2. PERSONAL CODE</th>
+                <th scope="col" className="py-3 px-3">3. JOB TITLE</th>
+                <th scope="col" className="py-3 px-3">4. DEPARTMENT</th>
+                <th scope="col" className="py-3 px-3">5. WORK GROUP</th>
+                <th scope="col" className="py-3 px-3">6. SITE / FACILITY</th>
+                <th scope="col" className="py-3 px-3">7. DIRECT MANAGER</th>
+                <th scope="col" className="py-3 px-3">8. MOBILE NUMBER</th>
+                <th scope="col" className="py-3 px-3 text-center">9. ASSIGNED DEVICES</th>
+                <th scope="col" className="py-3 px-3.5 text-right">ACTION</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
+            <tbody className="divide-y divide-[#D2C8B8] dark:divide-[#2B323D] text-[#141312] dark:text-[#F2EFE9]">
               {filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-10 text-center text-slate-400 dark:text-slate-500">
-                    No employee records match the search query.
+                  <td colSpan={10} className="py-12 text-center text-[#6E6960] dark:text-[#7C8797] font-mono-tabular">
+                    No employee records match the active query.
                   </td>
                 </tr>
               ) : (
@@ -133,11 +133,11 @@ export const EmployeesView: React.FC = () => {
                     <tr
                       key={emp.personalCode}
                       onClick={() => setSelectedEmployee(emp)}
-                      className="cursor-pointer hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
+                      className="cursor-pointer hover:bg-[#E5DFD2]/60 dark:hover:bg-[#181C24]/80 transition-colors"
                     >
                       {/* Name */}
-                      <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs font-bold">
+                      <td className="py-2.5 px-3.5 font-bold text-[#141312] dark:text-[#F2EFE9] flex items-center gap-2">
+                        <div className="flex h-6 w-6 items-center justify-center rounded bg-[#141312] text-[#F8F4EC] dark:bg-[#F2EFE9] dark:text-[#12151B] text-[10px] font-black font-mono-tabular">
                           {emp.firstName[0]}
                           {emp.lastName[0]}
                         </div>
@@ -147,47 +147,47 @@ export const EmployeesView: React.FC = () => {
                       </td>
 
                       {/* Personal Code */}
-                      <td className="py-3 px-3 font-mono font-medium text-slate-600 dark:text-slate-300">
+                      <td className="py-2.5 px-3 font-mono-tabular font-bold text-[#141312] dark:text-[#F2EFE9]">
                         {emp.personalCode}
                       </td>
 
                       {/* Job Title */}
-                      <td className="py-3 px-3 text-slate-800 dark:text-slate-200">
+                      <td className="py-2.5 px-3 font-medium text-[#141312] dark:text-[#F2EFE9]">
                         {emp.jobTitle}
                       </td>
 
                       {/* Department */}
-                      <td className="py-3 px-3 text-slate-600 dark:text-slate-400">
+                      <td className="py-2.5 px-3 text-[#6E6960] dark:text-[#7C8797]">
                         {emp.department}
                       </td>
 
                       {/* Work Group */}
-                      <td className="py-3 px-3 text-slate-600 dark:text-slate-400">
+                      <td className="py-2.5 px-3 text-[#6E6960] dark:text-[#7C8797]">
                         {emp.workGroup}
                       </td>
 
                       {/* Site */}
-                      <td className="py-3 px-3 text-slate-600 dark:text-slate-400">
+                      <td className="py-2.5 px-3 text-[#6E6960] dark:text-[#7C8797]">
                         {emp.site}
                       </td>
 
                       {/* Direct Manager */}
-                      <td className="py-3 px-3 font-medium text-slate-800 dark:text-slate-200">
+                      <td className="py-2.5 px-3 font-semibold text-[#141312] dark:text-[#F2EFE9]">
                         {emp.directManager}
                       </td>
 
                       {/* Mobile */}
-                      <td className="py-3 px-3 font-mono text-slate-500 dark:text-slate-400">
+                      <td className="py-2.5 px-3 font-mono-tabular text-[#6E6960] dark:text-[#7C8797]">
                         {emp.mobileNumber}
                       </td>
 
                       {/* Assigned Device Count */}
-                      <td className="py-3 px-3 text-center">
+                      <td className="py-2.5 px-3 text-center">
                         <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-semibold font-mono ${
+                          className={`rounded px-2 py-0.5 text-xs font-bold font-mono-tabular ${
                             assignedCount > 0
-                              ? 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
-                              : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+                              ? 'bg-[#5D7F5F] text-black dark:bg-[#668768] dark:text-black'
+                              : 'bg-[#E5DFD2] text-[#6E6960] dark:bg-[#181C24] dark:text-[#7C8797]'
                           }`}
                         >
                           {assignedCount}
@@ -195,15 +195,15 @@ export const EmployeesView: React.FC = () => {
                       </td>
 
                       {/* Action */}
-                      <td className="py-3 px-4 text-right">
+                      <td className="py-2.5 px-3.5 text-right">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedEmployee(emp);
                           }}
-                          className="rounded p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
+                          className="rounded p-1 text-[#6E6960] hover:text-[#141312] hover:bg-[#E5DFD2] dark:text-[#7C8797] dark:hover:text-[#F2EFE9] dark:hover:bg-[#181C24]"
                         >
-                          <ChevronRight className="h-4 w-4" />
+                          <Eye className="h-4 w-4" />
                         </button>
                       </td>
                     </tr>
@@ -215,128 +215,128 @@ export const EmployeesView: React.FC = () => {
         </div>
       </div>
 
-      {/* Employee Device Inspection Drawer */}
+      {/* Employee Detail & Assigned Hardware Drawer */}
       {selectedEmployee && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div
-            className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs"
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs"
             onClick={() => setSelectedEmployee(null)}
           />
-          <div className="relative flex w-full max-w-lg flex-col bg-white shadow-2xl dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 animate-in slide-in-from-right duration-200 overflow-y-auto">
+          <div className="relative flex w-full max-w-lg flex-col bg-[#F8F4EC] dark:bg-[#12151B] border-l border-[#D2C8B8] dark:border-[#2B323D] shadow-2xl animate-in slide-in-from-right duration-150 overflow-y-auto">
             {/* Header */}
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/95 px-6 py-4 dark:border-slate-800 dark:bg-slate-900/95 backdrop-blur-sm">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 font-bold text-sm">
-                  {selectedEmployee.firstName[0]}
-                  {selectedEmployee.lastName[0]}
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                    {selectedEmployee.firstName} {selectedEmployee.lastName}
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                    {selectedEmployee.personalCode} · {selectedEmployee.jobTitle}
-                  </p>
-                </div>
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#D2C8B8] bg-[#F8F4EC]/95 px-6 py-4 dark:border-[#2B323D] dark:bg-[#12151B]/95 backdrop-blur-sm">
+              <div className="flex items-center gap-2">
+                <span className="font-industrial-display font-black text-base text-[#141312] dark:text-[#F2EFE9]">
+                  {selectedEmployee.firstName} {selectedEmployee.lastName}
+                </span>
+                <span className="rounded bg-[#E5DFD2] dark:bg-[#181C24] px-1.5 py-0.5 text-xs font-mono-tabular font-bold border border-[#D2C8B8] dark:border-[#2B323D]">
+                  {selectedEmployee.personalCode}
+                </span>
               </div>
               <button
                 onClick={() => setSelectedEmployee(null)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="rounded p-1 text-[#6E6960] hover:text-[#141312] hover:bg-[#E5DFD2] dark:text-[#7C8797] dark:hover:text-[#F2EFE9] dark:hover:bg-[#181C24]"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Profile Summary Card */}
+            {/* Content */}
             <div className="p-6 space-y-6">
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40 text-xs space-y-2">
-                <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Approved Personnel Attributes
+              {/* 9 Approved Personnel Specs */}
+              <div className="rounded-lg border border-[#D2C8B8] bg-[#E5DFD2]/60 p-4 dark:border-[#2B323D] dark:bg-[#181C24] font-mono-tabular text-xs space-y-3">
+                <h4 className="font-industrial-display font-black text-xs uppercase tracking-wider text-[#141312] dark:text-[#F2EFE9] pb-2 border-b border-[#D2C8B8] dark:border-[#2B323D]">
+                  PERSONNEL PROFILE (9 APPROVED FIELDS)
                 </h4>
-                <div className="grid grid-cols-2 gap-2 pt-1">
+
+                <div className="grid grid-cols-2 gap-3 pt-1">
                   <div>
-                    <span className="text-slate-400">Department:</span>
-                    <p className="font-medium text-slate-800 dark:text-slate-200">
-                      {selectedEmployee.department}
+                    <span className="text-[10px] text-[#6E6960] dark:text-[#7C8797] uppercase">Full Name</span>
+                    <p className="font-bold text-[#141312] dark:text-[#F2EFE9]">
+                      {selectedEmployee.firstName} {selectedEmployee.lastName}
                     </p>
                   </div>
                   <div>
-                    <span className="text-slate-400">Work Group:</span>
-                    <p className="font-medium text-slate-800 dark:text-slate-200">
-                      {selectedEmployee.workGroup}
-                    </p>
+                    <span className="text-[10px] text-[#6E6960] dark:text-[#7C8797] uppercase">Personal Code</span>
+                    <p className="font-bold text-[#141312] dark:text-[#F2EFE9]">{selectedEmployee.personalCode}</p>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-[#6E6960] dark:text-[#7C8797] uppercase">Job Title</span>
+                    <p className="font-semibold text-[#141312] dark:text-[#F2EFE9]">{selectedEmployee.jobTitle}</p>
                   </div>
                   <div>
-                    <span className="text-slate-400">Site Facility:</span>
-                    <p className="font-medium text-slate-800 dark:text-slate-200">
-                      {selectedEmployee.site}
-                    </p>
+                    <span className="text-[10px] text-[#6E6960] dark:text-[#7C8797] uppercase">Department</span>
+                    <p className="text-[#141312] dark:text-[#F2EFE9]">{selectedEmployee.department}</p>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-[#6E6960] dark:text-[#7C8797] uppercase">Work Group</span>
+                    <p className="text-[#141312] dark:text-[#F2EFE9]">{selectedEmployee.workGroup}</p>
                   </div>
                   <div>
-                    <span className="text-slate-400">Direct Manager:</span>
-                    <p className="font-medium text-slate-800 dark:text-slate-200">
-                      {selectedEmployee.directManager}
-                    </p>
+                    <span className="text-[10px] text-[#6E6960] dark:text-[#7C8797] uppercase">Facility / Site</span>
+                    <p className="text-[#141312] dark:text-[#F2EFE9]">{selectedEmployee.site}</p>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-[#6E6960] dark:text-[#7C8797] uppercase">Direct Manager</span>
+                    <p className="font-semibold text-[#141312] dark:text-[#F2EFE9]">{selectedEmployee.directManager}</p>
                   </div>
                   <div>
-                    <span className="text-slate-400">Mobile Number:</span>
-                    <p className="font-mono font-medium text-slate-800 dark:text-slate-200">
-                      {selectedEmployee.mobileNumber}
-                    </p>
+                    <span className="text-[10px] text-[#6E6960] dark:text-[#7C8797] uppercase">Mobile Number</span>
+                    <p className="text-[#141312] dark:text-[#F2EFE9]">{selectedEmployee.mobileNumber}</p>
                   </div>
                 </div>
               </div>
 
-              {/* Currently Assigned Devices Section */}
+              {/* Active Assigned Equipment (Strictly excludes returned units) */}
               <div className="space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white flex items-center justify-between">
-                  <span>Currently Assigned Hardware</span>
-                  <span className="font-mono text-xs font-semibold text-blue-600 dark:text-blue-400">
-                    {getAssignedAssets(selectedEmployee.personalCode).length} Devices
+                <div className="flex items-center justify-between">
+                  <h4 className="font-industrial-display font-black text-xs uppercase tracking-wider text-[#141312] dark:text-[#F2EFE9]">
+                    ACTIVE HARDWARE ASSIGNMENTS ({getAssignedAssets(selectedEmployee.personalCode).length})
+                  </h4>
+                  <span className="font-mono-tabular text-[10px] text-[#6E6960] dark:text-[#7C8797]">
+                    EXCLUDES RETURNED UNITS
                   </span>
-                </h4>
+                </div>
 
-                <div className="space-y-3">
-                  {getAssignedAssets(selectedEmployee.personalCode).length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400 dark:border-slate-800">
-                      No active devices currently assigned.
-                    </div>
-                  ) : (
-                    getAssignedAssets(selectedEmployee.personalCode).map((asset) => (
+                {getAssignedAssets(selectedEmployee.personalCode).length === 0 ? (
+                  <div className="rounded border border-[#D2C8B8] p-4 text-center text-xs font-mono-tabular text-[#6E6960] dark:border-[#2B323D] dark:text-[#7C8797]">
+                    No hardware assets are currently allocated to this employee.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 font-mono-tabular">
+                    {getAssignedAssets(selectedEmployee.personalCode).map((asset) => (
                       <div
                         key={asset.assetNumber}
                         onClick={() => {
+                          setSelectedEmployee(null);
                           setSelectedAssetNumber(asset.assetNumber);
                           setActiveView('assets');
-                          setSelectedEmployee(null);
                         }}
-                        className="group rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs hover:border-blue-400 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-600 cursor-pointer transition-all"
+                        className="rounded border border-[#D2C8B8] bg-[#E5DFD2]/40 p-3 hover:bg-[#E5DFD2] dark:border-[#2B323D] dark:bg-[#181C24] dark:hover:bg-[#1F242E] cursor-pointer transition-colors flex items-center justify-between"
                       >
-                        <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
                           <div className="flex items-center gap-2">
-                            <Laptop className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                            <span className="font-mono font-bold text-slate-900 dark:text-white text-xs">
+                            <span className="font-bold text-xs text-[#141312] dark:text-[#F2EFE9]">
                               {asset.assetNumber}
                             </span>
+                            <span className="text-xs text-[#6E6960] dark:text-[#7C8797]">
+                              {asset.model} ({asset.type})
+                            </span>
                           </div>
-                          <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                            {asset.status}
-                          </span>
+                          <p className="text-[11px] text-[#6E6960] dark:text-[#7C8797]">
+                            S/N: {asset.serialNumber} · Location: {asset.location}
+                          </p>
                         </div>
-                        <p className="mt-1 text-xs font-medium text-slate-800 dark:text-slate-200">
-                          {asset.model} ({asset.type})
-                        </p>
-                        <div className="mt-2 flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500">
-                          <span>SN: {asset.serialNumber}</span>
-                          <span className="text-blue-600 dark:text-blue-400 group-hover:underline flex items-center gap-1 font-medium">
-                            Inspect Asset
-                            <ArrowRight className="h-3 w-3" />
-                          </span>
-                        </div>
+                        <span className="text-xs font-bold text-[#E49C52] dark:text-[#E7A45F]">
+                          Inspect →
+                        </span>
                       </div>
-                    ))
-                  )}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

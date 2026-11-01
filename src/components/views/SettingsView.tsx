@@ -1,5 +1,5 @@
 /**
- * IT Asset Management - System Settings View
+ * IT Asset Management - System Settings View (Industrial Redesign)
  * Configuration panel for IT Admins: Revision threshold adjustment, stockroom location, and policy invariants.
  */
 
@@ -57,152 +57,122 @@ export const SettingsView: React.FC = () => {
   const isITAdmin = currentUser.role === 'IT Admin';
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-4 max-w-4xl">
       {/* Header Banner */}
-      <div className="rounded-xl border border-slate-200 bg-white p-4.5 shadow-xs dark:border-slate-800 dark:bg-slate-900 transition-colors">
-        <h1 className="text-base font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-          <Settings className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-          System Configuration &amp; Compliance Thresholds
+      <div className="rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] p-3.5 dark:border-[#2B323D] dark:bg-[#12151B]">
+        <h1 className="font-industrial-display text-base font-black uppercase tracking-tight text-[#141312] dark:text-[#F2EFE9] flex items-center gap-2">
+          <Settings className="h-5 w-5 text-[#E49C52] dark:text-[#E7A45F]" />
+          SYSTEM PARAMETERS &amp; COMPLIANCE THRESHOLDS
         </h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Tune operational audit thresholds and storage configurations. Administrative controls are restricted to the <strong>IT Admin</strong> role.
+        <p className="text-xs text-[#6E6960] dark:text-[#7C8797] font-medium mt-0.5">
+          Tune operational audit thresholds and storage defaults. Administrative controls are restricted to the <strong>IT Admin</strong> role.
         </p>
       </div>
 
       {savedNotice && (
-        <div className="flex items-center gap-2 rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-          <span>System configuration successfully updated. Dashboard audit indicators recalculated.</span>
+        <div className="flex items-center gap-2 rounded-lg bg-[#5D7F5F]/15 p-3 text-xs text-[#5D7F5F] dark:text-[#88B08A] border border-[#5D7F5F] font-mono-tabular">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>System parameters updated. Dashboard audit indicators recalculated.</span>
         </div>
       )}
 
       {resetNotice && (
-        <div className="flex items-center gap-2 rounded-xl bg-blue-50 p-3 text-xs text-blue-800 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-blue-600" />
-          <span>Mock database successfully restored to pristine initial state.</span>
+        <div className="flex items-center gap-2 rounded-lg bg-[#E49C52]/15 p-3 text-xs text-[#E49C52] dark:text-[#F0B87A] border border-[#E49C52] font-mono-tabular">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>Mock database restored to initial state.</span>
         </div>
       )}
 
       {/* Main Settings Form */}
-      <form onSubmit={handleSave} className="space-y-6">
+      <form onSubmit={handleSave} className="space-y-4 font-mono-tabular">
         {/* Revision Threshold Setting */}
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900 transition-colors space-y-4">
+        <div className="rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] p-4.5 dark:border-[#2B323D] dark:bg-[#12151B] space-y-3">
           <div className="flex items-start justify-between">
             <div className="space-y-1">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
-                <Clock className="h-4 w-4 text-blue-600" />
-                Needs Review Audit Threshold
+              <h2 className="font-industrial-display text-xs font-black uppercase tracking-wider text-[#141312] dark:text-[#F2EFE9] flex items-center gap-2">
+                <Clock className="h-4 w-4 text-[#E49C52] dark:text-[#E7A45F]" />
+                NEEDS REVIEW AUDIT THRESHOLD
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Assets whose <strong>Revision Date</strong> is older than this duration will automatically trigger the
-                <span className="text-rose-600 dark:text-rose-400 font-semibold"> Needs Review</span> operational indicator.
+              <p className="text-xs text-[#6E6960] dark:text-[#7C8797]">
+                Assets whose <strong>Revision Date</strong> is older than this duration automatically trigger the
+                <span className="text-[#B2534C] dark:text-[#E28882] font-bold"> Needs Review</span> operational indicator.
               </p>
             </div>
-            {!isITAdmin && (
-              <span className="flex items-center gap-1 text-[11px] text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800">
-                <Lock className="h-3 w-3" />
-                Read Only
-              </span>
-            )}
+            <span className="rounded bg-[#E5DFD2] dark:bg-[#181C24] px-2 py-0.5 text-xs font-bold text-[#141312] dark:text-[#F2EFE9] border border-[#D2C8B8] dark:border-[#2B323D]">
+              {settings.revisionThresholdMonths} MONTHS
+            </span>
           </div>
 
-          <div className="max-w-xs space-y-2">
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Audit Cycle Interval (Months)
-            </label>
-            <div className="flex items-center gap-3">
-              <select
-                disabled={!isITAdmin}
-                value={settings.revisionThresholdMonths}
-                onChange={(e) =>
-                  setSettings({ ...settings, revisionThresholdMonths: Number(e.target.value) })
-                }
-                className="w-full rounded-lg border border-slate-200 bg-white py-2 px-3 text-xs font-medium text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 disabled:opacity-50"
-              >
-                <option value={3}>3 Months (Quarterly Strict Audit)</option>
-                <option value={6}>6 Months (Initial Standard Threshold)</option>
-                <option value={9}>9 Months</option>
-                <option value={12}>12 Months (Annual Audit Cycle)</option>
-              </select>
-            </div>
-            <p className="text-[11px] text-slate-400">
-              Current setting: Devices un-inspected for &gt; <strong>{settings.revisionThresholdMonths} months</strong> are flagged.
-            </p>
-          </div>
-        </div>
-
-        {/* Stockroom Location Configuration */}
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900 transition-colors space-y-4">
-          <div className="space-y-1">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
-              <Building className="h-4 w-4 text-emerald-600" />
-              Default IT Stockroom Return Location
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              When a device is returned from an employee, the asset's location automatically defaults to this facility.
-            </p>
-          </div>
-
-          <div className="max-w-md space-y-1">
+          <div className="pt-2">
             <input
-              type="text"
+              type="range"
+              min="1"
+              max="24"
+              step="1"
               disabled={!isITAdmin}
-              value={settings.defaultStockroomLocation}
-              onChange={(e) => setSettings({ ...settings, defaultStockroomLocation: e.target.value })}
-              className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 disabled:opacity-50"
+              value={settings.revisionThresholdMonths}
+              onChange={(e) =>
+                setSettings({ ...settings, revisionThresholdMonths: parseInt(e.target.value, 10) })
+              }
+              className="w-full h-2 bg-[#E5DFD2] rounded-xs appearance-none cursor-pointer accent-[#E49C52] dark:bg-[#181C24] dark:accent-[#E7A45F]"
             />
-          </div>
-        </div>
-
-        {/* Mandatory Policy Invariants Callout */}
-        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5 dark:border-slate-800 dark:bg-slate-800/30 text-xs space-y-3">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-blue-600" />
-            Approved System Invariants (Non-Configurable Policy Rules)
-          </h2>
-
-          <div className="space-y-2 text-slate-600 dark:text-slate-400 text-[11px]">
-            <div className="flex items-start gap-2">
-              <span className="font-bold text-slate-800 dark:text-slate-200">•</span>
-              <span>
-                <strong>Unconditional Duplicate Rejection:</strong> Duplicate Asset Numbers and Serial Numbers are strictly rejected across both manual entry and Excel imports. This integrity check cannot be disabled by user preference.
-              </span>
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="font-bold text-slate-800 dark:text-slate-200">•</span>
-              <span>
-                <strong>Exact Status Set:</strong> Asset Status is strictly limited to <code>In Use</code>, <code>Spare</code>, and <code>Disposed</code>.
-              </span>
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="font-bold text-slate-800 dark:text-slate-200">•</span>
-              <span>
-                <strong>Comment Preservation:</strong> Device returns store return-specific notes in the separate <code>ReturnRecord</code> and never overwrite the asset's general comment.
-              </span>
+            <div className="flex justify-between text-[10px] text-[#6E6960] dark:text-[#7C8797] mt-1">
+              <span>1 Month</span>
+              <span>6 Months (Standard)</span>
+              <span>12 Months</span>
+              <span>24 Months</span>
             </div>
           </div>
         </div>
 
-        {/* Action Button */}
-        {isITAdmin && (
-          <div className="flex items-center justify-between pt-2">
+        {/* Default Stockroom Location */}
+        <div className="rounded-lg border border-[#D2C8B8] bg-[#F8F4EC] p-4.5 dark:border-[#2B323D] dark:bg-[#12151B] space-y-3">
+          <div className="space-y-1">
+            <h2 className="font-industrial-display text-xs font-black uppercase tracking-wider text-[#141312] dark:text-[#F2EFE9] flex items-center gap-2">
+              <Building className="h-4 w-4 text-[#5D7F5F] dark:text-[#668768]" />
+              DEFAULT RETURN STOCKROOM FACILITY
+            </h2>
+            <p className="text-xs text-[#6E6960] dark:text-[#7C8797]">
+              When an asset is returned to stock, this location is automatically assigned as its current storage address.
+            </p>
+          </div>
+
+          <input
+            type="text"
+            disabled={!isITAdmin}
+            value={settings.defaultStockroomLocation}
+            onChange={(e) => setSettings({ ...settings, defaultStockroomLocation: e.target.value })}
+            className="w-full rounded border border-[#D2C8B8] bg-[#E5DFD2]/60 p-2.5 text-xs text-[#141312] focus:border-[#E49C52] focus:outline-none dark:border-[#2B323D] dark:bg-[#181C24] dark:text-[#F2EFE9]"
+          />
+        </div>
+
+        {/* Submit Actions */}
+        <div className="flex items-center justify-between pt-2">
+          {isITAdmin ? (
+            <button
+              type="submit"
+              className="rounded bg-[#E49C52] text-black dark:bg-[#E7A45F] dark:text-black px-4 py-2 text-xs font-black font-industrial-display shadow-xs hover:brightness-105 transition-all"
+            >
+              SAVE CONFIGURATION
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-[#6E6960] dark:text-[#7C8797]">
+              <Lock className="h-4 w-4" />
+              <span>Settings can only be modified by IT Administrators.</span>
+            </div>
+          )}
+
+          {isITAdmin && (
             <button
               type="button"
               onClick={handleResetData}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:border-slate-700 dark:bg-slate-800 dark:text-rose-400 dark:hover:bg-slate-750 transition-colors"
+              className="flex items-center gap-1.5 rounded border border-[#B2534C] text-[#B2534C] dark:border-[#B85D56] dark:text-[#E28882] px-3 py-1.5 text-xs font-bold hover:bg-[#B2534C]/10 transition-colors"
             >
-              <RotateCcw className="h-4 w-4" />
-              <span>Reset Mock Database</span>
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>RESET DEMO DATA</span>
             </button>
-
-            <button
-              type="submit"
-              className="rounded-lg bg-blue-600 px-5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors"
-            >
-              Save Configuration
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </form>
     </div>
   );

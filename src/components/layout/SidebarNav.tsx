@@ -1,6 +1,6 @@
 /**
- * IT Asset Management - Sidebar Navigation Component
- * Modern vertical navigation supporting desktop and mobile drawer modes.
+ * IT Asset Management - Sidebar Navigation Component (Industrial Neo-Brutalist)
+ * High-contrast solid amber active blocks, geometric brand icon, and technical session card.
  */
 
 import React from 'react';
@@ -13,10 +13,8 @@ import {
   Settings,
   ShieldCheck,
   X,
-  Server,
-  Shield,
-  Briefcase,
-  User,
+  LogOut,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { useApp, ViewType } from '../../context/AppContext.tsx';
 
@@ -32,7 +30,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'assets', label: 'Assets', icon: Laptop },
   { id: 'employees', label: 'Employees', icon: Users2 },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
-  { id: 'import', label: 'Import', icon: FileSpreadsheet, badge: 'Excel' },
+  { id: 'import', label: 'Import', icon: FileSpreadsheet, badge: 'XLSX' },
   { id: 'settings', label: 'Settings', icon: Settings },
   { id: 'users', label: 'User Management', icon: ShieldCheck },
 ];
@@ -51,55 +49,51 @@ export const SidebarNav: React.FC = () => {
     setIsMobileNavOpen(false);
   };
 
-  const roleBadgeStyle = () => {
-    switch (currentUser.role) {
-      case 'IT Admin':
-        return 'text-blue-700 bg-blue-50 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800';
-      case 'Manager / Supervisor':
-        return 'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800';
-      case 'Employee':
-        return 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800';
-    }
-  };
-
   const navContent = (
-    <div className="flex h-full flex-col justify-between bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-colors">
+    <div className="flex h-full flex-col justify-between bg-[#F8F4EC] dark:bg-[#12151B] border-r border-[#D2C8B8] dark:border-[#2B323D] transition-colors select-none">
       {/* Brand & Navigation Area */}
       <div className="flex flex-col">
-        {/* Brand Lockup */}
-        <div className="flex h-16 items-center justify-between px-6 border-b border-slate-100 dark:border-slate-800/80">
+        {/* Brand Lockup matching Reference Image */}
+        <div className="flex h-16 items-center justify-between px-5 border-b border-[#D2C8B8] dark:border-[#2B323D]">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white shadow-xs">
-              <Server className="h-5 w-5" />
+            {/* Geometric Angled Industrial Logo Mark */}
+            <div className="flex h-9 w-9 items-center justify-center rounded bg-[#E49C52] dark:bg-[#E7A45F] text-black shadow-xs">
+              <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24">
+                <path d="M4 19h4L16 7h-4L4 19zm12-14l4 4-2 2-4-4 2-2zM4 5h6v4H4V5z" />
+              </svg>
             </div>
             <div>
-              <span className="text-sm font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap">
-                IT Asset Management
+              <span className="font-industrial-display text-sm font-black tracking-tight text-[#141312] dark:text-[#F2EFE9] uppercase leading-none block">
+                ASSET
               </span>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium leading-none mt-0.5">
-                Enterprise Fleet Portal
-              </p>
+              <span className="font-industrial-display text-xs font-bold tracking-wider text-[#6E6960] dark:text-[#7C8797] uppercase leading-none block mt-0.5">
+                MANAGEMENT
+              </span>
             </div>
           </div>
+
           {/* Mobile close button */}
           <button
             onClick={() => setIsMobileNavOpen(false)}
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden"
+            className="rounded p-1 text-[#6E6960] hover:bg-[#E5DFD2] dark:text-[#7C8797] dark:hover:bg-[#181C24] lg:hidden"
             aria-label="Close sidebar"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Section Heading */}
-        <div className="px-6 pt-5 pb-2">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-            Navigation
+        {/* Technical Sub-Header */}
+        <div className="px-5 pt-4 pb-2 flex items-center justify-between">
+          <span className="font-mono-tabular text-[10px] font-bold uppercase tracking-wider text-[#6E6960] dark:text-[#7C8797]">
+            // SYSTEM WORKSPACES
+          </span>
+          <span className="font-mono-tabular text-[10px] text-[#6E6960] dark:text-[#7C8797] opacity-60">
+            [07]
           </span>
         </div>
 
         {/* Nav Link List */}
-        <nav className="flex flex-col gap-1 px-3">
+        <nav className="flex flex-col gap-1.5 px-3">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
@@ -107,24 +101,31 @@ export const SidebarNav: React.FC = () => {
               <button
                 key={item.id}
                 onClick={() => handleNavClick(item.id)}
-                className={`group flex items-center justify-between rounded-lg px-3 py-2.5 text-xs font-medium transition-all ${
+                className={`group relative flex items-center justify-between rounded-lg px-3.5 py-2.5 text-xs font-bold transition-all text-left ${
                   isActive
-                    ? 'bg-blue-50 text-blue-700 font-semibold dark:bg-blue-900/30 dark:text-blue-300'
-                    : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-200'
+                    ? 'bg-[#E49C52] text-black dark:bg-[#E7A45F] dark:text-black shadow-sm'
+                    : 'text-[#2A2723] hover:bg-[#E5DFD2] dark:text-[#C5CCD6] dark:hover:bg-[#181C24] dark:hover:text-white'
                 }`}
               >
                 <div className="flex items-center gap-3">
                   <Icon
-                    className={`h-4 w-4 transition-colors ${
+                    className={`h-4 w-4 shrink-0 transition-colors ${
                       isActive
-                        ? 'text-blue-600 dark:text-blue-400'
-                        : 'text-slate-400 group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300'
+                        ? 'text-black'
+                        : 'text-[#6E6960] group-hover:text-black dark:text-[#7C8797] dark:group-hover:text-white'
                     }`}
                   />
-                  <span>{item.label}</span>
+                  <span className="font-industrial-display tracking-wide">{item.label}</span>
                 </div>
+
                 {item.badge && (
-                  <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[9px] font-mono-tabular font-bold ${
+                      isActive
+                        ? 'bg-black/20 text-black'
+                        : 'bg-[#D2C8B8]/60 text-[#141312] dark:bg-[#2B323D] dark:text-[#C5CCD6]'
+                    }`}
+                  >
                     {item.badge}
                   </span>
                 )}
@@ -134,31 +135,35 @@ export const SidebarNav: React.FC = () => {
         </nav>
       </div>
 
-      {/* User Session Profile Footnote */}
-      <div className="p-4 border-t border-slate-100 dark:border-slate-800/80">
-        <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3 border border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200 text-xs font-bold">
+      {/* User Session Profile Card matching Reference Image */}
+      <div className="p-3 border-t border-[#D2C8B8] dark:border-[#2B323D]">
+        <div className="rounded-lg bg-[#E5DFD2]/70 dark:bg-[#181C24] p-3 border border-[#D2C8B8] dark:border-[#2B323D] flex items-center justify-between">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#141312] text-[#F8F4EC] dark:bg-[#F2EFE9] dark:text-[#12151B] text-xs font-black font-mono-tabular">
               {currentUser.name
                 .split(' ')
                 .map((n) => n[0])
                 .join('')}
+              <span className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-[#5D7F5F] dark:bg-[#668768] ring-1 ring-[#F8F4EC] dark:ring-[#12151B]" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-semibold text-slate-800 dark:text-slate-200">
+              <p className="truncate text-xs font-bold text-[#141312] dark:text-[#F2EFE9] font-industrial-display">
                 {currentUser.name}
               </p>
-              <p className="truncate text-[10px] text-slate-500 dark:text-slate-400">
-                {currentUser.email}
+              <p className="truncate text-[10px] font-mono-tabular text-[#6E6960] dark:text-[#7C8797]">
+                {currentUser.role}
               </p>
             </div>
           </div>
-          <div className="mt-2.5 flex items-center justify-between pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-[10px]">
-            <span className="text-slate-500 dark:text-slate-400">Active Role:</span>
-            <span className={`rounded-sm border px-1.5 py-0.5 font-medium ${roleBadgeStyle()}`}>
-              {currentUser.role}
-            </span>
-          </div>
+
+          <button
+            onClick={() => setActiveView('users')}
+            className="rounded p-1 text-[#6E6960] hover:text-black hover:bg-[#D2C8B8] dark:text-[#7C8797] dark:hover:text-white dark:hover:bg-[#2B323D] transition-colors"
+            title="User Profile & Roles"
+            aria-label="User settings"
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+          </button>
         </div>
       </div>
     </div>
@@ -167,7 +172,7 @@ export const SidebarNav: React.FC = () => {
   return (
     <>
       {/* Desktop Persistent Sidebar */}
-      <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:shrink-0 h-screen sticky top-0">
+      <aside className="hidden lg:flex lg:w-60 lg:flex-col lg:shrink-0 h-screen sticky top-0">
         {navContent}
       </aside>
 
@@ -175,10 +180,10 @@ export const SidebarNav: React.FC = () => {
       {isMobileNavOpen && (
         <div className="fixed inset-0 z-50 flex lg:hidden">
           <div
-            className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs transition-opacity"
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
             onClick={() => setIsMobileNavOpen(false)}
           />
-          <aside className="relative flex w-72 max-w-xs flex-1 flex-col shadow-xl animate-in slide-in-from-left duration-200">
+          <aside className="relative flex w-72 max-w-xs flex-1 flex-col shadow-2xl animate-in slide-in-from-left duration-150">
             {navContent}
           </aside>
         </div>

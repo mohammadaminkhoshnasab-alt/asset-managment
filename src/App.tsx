@@ -19,7 +19,7 @@ const AppContent: React.FC = () => {
   const { activeView } = useApp();
 
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 transition-colors">
+    <div className="flex min-h-screen bg-[#EFE9DF] text-[#141312] dark:bg-[#090A0D] dark:text-[#F2EFE9] transition-colors selection:bg-[#E7A45F] selection:text-black">
       {/* Left Vertical Sidebar */}
       <SidebarNav />
 
@@ -27,7 +27,7 @@ const AppContent: React.FC = () => {
       <div className="flex flex-1 flex-col min-w-0">
         <TopHeader />
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto animate-in fade-in duration-200">
+        <main className="flex-1 p-3 sm:p-5 lg:p-6 max-w-[1400px] w-full mx-auto animate-in fade-in duration-150">
           {activeView === 'dashboard' && <DashboardView />}
           {activeView === 'assets' && <AssetsView />}
           {activeView === 'employees' && <EmployeesView />}
@@ -37,9 +37,16 @@ const AppContent: React.FC = () => {
           {activeView === 'users' && <UserManagementView />}
         </main>
 
-        {/* Quiet Minimalist Footer */}
-        <footer className="border-t border-slate-200/80 bg-white/60 py-4 px-6 text-center text-xs text-slate-400 dark:border-slate-800/80 dark:bg-slate-900/60 dark:text-slate-500">
-          <span>IT Asset Management Foundation · Standardized Frontend Workspace</span>
+        {/* Industrial Status Footer */}
+        <footer className="border-t border-[#D2C8B8] bg-[#E5DFD2]/60 py-3 px-6 text-center text-xs text-[#6E6960] dark:border-[#2B323D] dark:bg-[#12151B]/60 dark:text-[#7C8797] font-mono-tabular">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 max-w-[1400px] mx-auto text-[11px]">
+            <span className="font-semibold tracking-wider uppercase">
+              /// IT ASSET MANAGEMENT SYSTEM // AIR-GAPPED ON-PREMISES EDITION
+            </span>
+            <span className="opacity-75">
+              FIRMWARE V4.2.0-STABLE · ZERO EXTERNAL TELEMETRY
+            </span>
+          </div>
         </footer>
       </div>
     </div>
