@@ -5,6 +5,8 @@ import {
   validateCreateAssetInput,
   validatePatchAssetInput,
 } from '../validators/assetValidators.ts';
+import { validateListAssetsQuery } from '../validators/assetListValidators.ts';
+import type { FilterGroup } from '../validators/assetListValidators.ts';
 import {
   assetService,
   DuplicateIdentifierError,
@@ -14,12 +16,74 @@ import {
 export const assetRouter = Router();
 
 /**
+ * Helper to count total filter rules across nested groups.
+ */
+function countFilterRules(group?: FilterGroup): number {
+  if (!group || !Array.isArray(group.rules)) return 0;
+  let count = 0;
+  for (const item of group.rules) {
+    if ('operator' in item && ('AND' === item.operator || 'OR' === item.operator)) {
+      count += countFilterRules(item as FilterGroup);
+    } else {
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
  * Helper to derive authenticated administrator username from server session.
  * Never trusts client-supplied actor values.
  */
 function getSessionActor(req: Request): string {
   return req.session?.username || req.admin?.username || 'admin';
 }
+
+/**
+ * GET /api/assets
+ * Retrieves a bounded, paginated list of assets with deterministic sorting, global search,
+ * and validated AND/OR filter composition.
+ * Read-only endpoint; does not require CSRF token.
+ */
+assetRouter.get('/', async (req: Request, res: Response) => {
+  const validation = validateListAssetsQuery(req.query as Record<string, unknown>);
+  if (!validation.valid) {
+    res.status(400).json({
+      status: 'error',
+      error: validation.error,
+      field: validation.field,
+    });
+    return;
+  }
+
+  try {
+    const result = await assetService.listAssets(validation.data);
+    res.status(200).json({
+      status: 'ok',
+      data: result.items,
+      pagination: {
+        page: result.page,
+        pageSize: result.pageSize,
+        total: result.total,
+        totalPages: result.totalPages,
+      },
+      sort: {
+        sortBy: validation.data.sortBy,
+        sortOrder: validation.data.sortOrder,
+      },
+      filtersApplied: {
+        q: validation.data.q,
+        filterCount: countFilterRules(validation.data.filters),
+      },
+    });
+  } catch (err: any) {
+    console.error('[AssetRoute] List assets error:', err.message);
+    res.status(500).json({
+      status: 'error',
+      error: 'Failed to retrieve assets',
+    });
+  }
+});
 
 /**
  * POST /api/assets

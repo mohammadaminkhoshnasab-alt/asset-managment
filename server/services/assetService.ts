@@ -6,6 +6,11 @@ import type {
   CreateAssetValidatedData,
   PatchAssetValidatedData,
 } from '../validators/assetValidators.ts';
+import {
+  buildPrismaWhereClause,
+  buildPrismaOrderBy,
+} from '../validators/assetListValidators.ts';
+import type { ParsedListAssetsQuery } from '../validators/assetListValidators.ts';
 
 export class DuplicateIdentifierError extends Error {
   constructor(public readonly field: 'assetNumber' | 'serialNumber', public readonly value: string) {
@@ -39,12 +44,62 @@ export interface AssetHistoryResult {
   totalPages: number;
 }
 
+export interface ListAssetsResult {
+  items: any[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
 const ASSET_INCLUDE_RELATIONS = {
   type: true,
   location: true,
   deviceHealth: true,
   acOwner: true,
   currentUser: true,
+} as const;
+
+const ASSET_LIST_RELATIONS = {
+  type: {
+    select: {
+      id: true,
+      name: true,
+      code: true,
+    },
+  },
+  location: {
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      building: true,
+      floor: true,
+      room: true,
+    },
+  },
+  deviceHealth: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+  acOwner: {
+    select: {
+      id: true,
+      fullName: true,
+      personalCode: true,
+      department: true,
+    },
+  },
+  currentUser: {
+    select: {
+      id: true,
+      fullName: true,
+      username: true,
+      department: true,
+    },
+  },
 } as const;
 
 /**
@@ -273,6 +328,37 @@ export const assetService = {
       page,
       limit,
       totalPages: Math.ceil(total / limit) || 1,
+    };
+  },
+
+  /**
+   * Retrieves a bounded, paginated list of assets with deterministic sorting and optional filters.
+   */
+  async listAssets(query: ParsedListAssetsQuery): Promise<ListAssetsResult> {
+    const { page, pageSize, sortBy, sortOrder, q, filters } = query;
+    const skip = (page - 1) * pageSize;
+    const take = pageSize;
+
+    const where = buildPrismaWhereClause(q, filters);
+    const orderBy = buildPrismaOrderBy(sortBy, sortOrder);
+
+    const [items, total] = await Promise.all([
+      prisma.asset.findMany({
+        where,
+        orderBy,
+        skip,
+        take,
+        include: ASSET_LIST_RELATIONS,
+      }),
+      prisma.asset.count({ where }),
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize) || 1,
     };
   },
 };

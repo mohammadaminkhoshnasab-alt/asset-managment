@@ -144,3 +144,101 @@ export interface AssetHistoryResponse {
     totalPages: number;
   };
 }
+
+// -------------------------------------------------------------------
+// Phase P08: Advanced Assets Data Grid Types
+// -------------------------------------------------------------------
+
+export interface AssetListItem {
+  id: string;
+  model: string;
+  assetNumber: string | null;
+  serialNumber: string | null;
+  status: AssetStatusEnum;
+  department: string | null;
+  costCenter: string | null;
+  label: string | null;
+  typeId: string | null;
+  locationId: string | null;
+  deviceHealthId: string | null;
+  acOwnerId: string | null;
+  currentUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  type?: { id: string; name: string; code?: string | null } | null;
+  location?: {
+    id: string;
+    name: string;
+    code?: string | null;
+    building?: string | null;
+    floor?: string | null;
+    room?: string | null;
+  } | null;
+  deviceHealth?: { id: string; name: string } | null;
+  acOwner?: {
+    id: string;
+    fullName: string;
+    personalCode?: string | null;
+    department?: string | null;
+  } | null;
+  currentUser?: {
+    id: string;
+    fullName: string;
+    username?: string | null;
+    department?: string | null;
+  } | null;
+}
+
+export interface AssetListPagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface AssetListResponse {
+  status: 'ok' | 'error';
+  data: AssetListItem[];
+  pagination: AssetListPagination;
+  sort: {
+    sortBy: string;
+    sortOrder: 'asc' | 'desc';
+  };
+  filtersApplied: {
+    q?: string;
+    filterCount: number;
+  };
+  error?: string;
+}
+
+export type GridFilterOperator =
+  | 'equals'
+  | 'contains'
+  | 'in'
+  | 'empty'
+  | 'notEmpty'
+  | 'gt'
+  | 'lt'
+  | 'gte'
+  | 'lte';
+
+export interface GridFilterRule {
+  field: string;
+  operator: GridFilterOperator;
+  value?: any;
+}
+
+export interface GridFilterGroup {
+  operator: 'AND' | 'OR';
+  rules: (GridFilterRule | GridFilterGroup)[];
+}
+
+export interface ColumnDefinition {
+  id: string;
+  label: string;
+  defaultVisible: boolean;
+  sortable: boolean;
+  sortField?: string;
+  minWidth?: string;
+}
+

@@ -6,6 +6,7 @@ import { Header } from './Header.tsx';
 import { RoutePlaceholder } from '../ui/RoutePlaceholder.tsx';
 import { NewAssetView } from '../assets/NewAssetView.tsx';
 import { AssetDetailsView } from '../assets/AssetDetailsView.tsx';
+import { AllAssetsView } from '../assets/AllAssetsView.tsx';
 
 function parseRouteFromLocation(): { route: NavigationRoute; assetId: string | null } {
   if (typeof window === 'undefined') {
@@ -104,7 +105,7 @@ export const AppShell: React.FC = () => {
         />
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
-          {/* Active Route Content: P07 Asset Details, P06 New Asset Workspace, or Deferred Route Placeholder */}
+          {/* Active Route Content: P07 Asset Details, P06 New Asset Workspace, P08 All Assets Grid, or Deferred Route Placeholder */}
           {activeAssetId ? (
             <AssetDetailsView
               assetId={activeAssetId}
@@ -112,6 +113,8 @@ export const AppShell: React.FC = () => {
             />
           ) : currentRoute === 'new-asset' ? (
             <NewAssetView onNavigate={handleNavigate} />
+          ) : currentRoute === 'assets' ? (
+            <AllAssetsView onNavigate={handleNavigate} />
           ) : (
             <RoutePlaceholder item={activeNavItem} />
           )}

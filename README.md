@@ -1,4 +1,4 @@
-# IT Asset Management System — Phase P07 (Asset Details & Controlled Editing)
+# IT Asset Management System — Phase P08 (Advanced Assets Data Grid)
 
 A production-oriented full-stack IT Asset Management Web Application, designed for independent local deployment on Ubuntu Linux (including WSL2 and private VMs) and developed in Google AI Studio.
 
@@ -6,7 +6,7 @@ A production-oriented full-stack IT Asset Management Web Application, designed f
 
 ## 1. Architecture Overview (Modular Monolith)
 
-This repository implements **Phase P07 — Asset Details & Controlled Editing** on top of the Phase P01 foundation, Phase P02 PostgreSQL data architecture, Phase P03 single-administrator authentication, Phase P04 Core Asset APIs, Phase P05 Design System & Application Shell, and Phase P06 New Asset Registration. It delivers an authenticated Asset Details interface at `/assets/:id` with deep linking, browser history support, safe editing of the nine P04-allowlisted general fields, read-only responsibility locks (P10/P11 boundaries), and a paginated immutable Audit History ledger. All other unfinished workspaces remain preserved as roadmap placeholders.
+This repository implements **Phase P08 — Advanced Assets Data Grid** on top of the Phase P01 foundation, Phase P02 PostgreSQL data architecture, Phase P03 single-administrator authentication, Phase P04 Core Asset APIs, Phase P05 Design System & Application Shell, Phase P06 New Asset Registration, and Phase P07 Asset Details & Controlled Editing. It replaces the All Assets placeholder at `/assets` with a real, PostgreSQL-backed, read-only equipment data grid with global search, advanced Boolean AND/OR filter composition, server-side pagination, configurable column visibility, and links to P07 Asset Details (`/assets/:id`). All other unfinished workspaces remain preserved as roadmap placeholders.
 
 ### Directory Structure
 
@@ -374,40 +374,69 @@ Clicking "Edit Details" activates an in-place editing mode strictly restricted t
 
 ---
 
-## 7. Verification & Test Suite
+## 7. Advanced Assets Data Grid (Phase P08)
 
-Run the full automated test suite (63 tests across 12 test suites):
+### 7.1 Authenticated Listing API (`GET /api/assets`)
+- **Query Parameters:**
+  - `page`: positive integer (default 1).
+  - `pageSize`: integer between 1 and 100 (default 25).
+  - `sortBy`: allowlisted field string (`assetNumber`, `serialNumber`, `model`, `status`, `department`, `costCenter`, `label`, `createdAt`, `updatedAt`, `type`, `location`, `deviceHealth`, `acOwner`, `currentUser`; default `updatedAt`).
+  - `sortOrder`: `asc` | `desc` (default `desc`) with deterministic secondary tie-breaker `{ id: 'asc' }`.
+  - `q`: case-insensitive global search string (max 100 characters) across `model`, `assetNumber`, `serialNumber`, `label`, `department`, and `costCenter`.
+  - `status`: quick status filter (`IN_USE`, `SPARE`, `DISPOSED`, `UNKNOWN`).
+  - `filters`: structured JSON AST supporting grouped boolean composition (`AND` / `OR`, max depth 2, max 20 rules).
+- **Protection & Performance:** Protected by `requireAdmin` session authentication (401 Unauthorized for unauthenticated requests). Safe read-only endpoint (no CSRF token required). Never interpolates raw SQL; builds parameterized Prisma `where` clauses. Excludes sensitive admin credentials and session tables.
+
+### 7.2 UI Architecture (`AllAssetsView`)
+- **Responsive Inventory Grid:** Mounted at `/assets`, utilizing Modern Industrial Dark design (`#0a0c10`, `#11141c`, `#1d2330`).
+- **Debounced Search:** 350ms debounced global search input with clear trigger.
+- **Advanced Filter Builder Modal:** Modal UI allowing IT administrators to construct grouped `AND` / `OR` filter expressions with typed operators (`equals`, `contains`, `empty`, `notEmpty`, `gte`, `lte`).
+- **Configurable Column Visibility:** 9 default visible columns (`assetNumber`, `serialNumber`, `model`, `type`, `status`, `location`, `acOwner`, `currentUser`, `updatedAt`) plus 8 toggleable optional columns with quick reset to default.
+- **Deep Linking & Navigation:** Clicking any row or the "View" action button navigates to the P07 Asset Details route (`/assets/:id`) without inline editing. Search, filter, page, and sort state are synchronized to the URL query string and restored upon browser Back/Forward navigation.
+- **Preview Inspection Mode Guard:** When in preview inspection mode without active authentication, displays an explicit non-persistent grid shell banner with zero fabricated records.
+
+---
+
+## 8. Verification & Test Suite
+
+Run the full automated test suite (78 tests across 15 test suites):
 
 ```bash
 npm run test
 ```
 
 ### Automated Check Suites:
-1. `test/asset-details-editing.test.ts`: **(P07)** Verifies 9-field general patch allowlist, forbidden field rejection, client validation, no-op detection, NULL normalization, and `/assets/:uuid` route matching.
-2. `test/lookup-client.test.ts`: **(P06)** Verifies `DeviceHealth.name` mapping, complete success, partial catalog failure isolation, pre-existing state retention, and truthful 401/403 status distinction.
-3. `test/asset-form-validation.test.ts`: **(P06)** Verifies model requirement, optional UUID formatting, empty string to NULL normalization (no "N/A" synthesis), and distinct AC Owner vs Current User preservation.
-4. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items, path bindings, and rejection of unapproved screenshot-only navigation items.
-5. `test/asset-validation.test.ts`: **(P04)** Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
-6. `test/asset-endpoints.test.ts`: **(P04)** Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
-7. `test/asset-audit-service.test.ts`: **(P04)** Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
-8. `test/auth-password.test.ts`: **(P03)** Argon2id hash formatting, candidate verification, username and password strength validation.
-9. `test/auth-bootstrap.test.ts`: **(P03)** Password strength enforcement, username validation, single-admin duplicate rejection.
-10. `test/auth-endpoints.test.ts`: **(P03)** Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
-11. `test/database-schema.test.ts`: **(P02)** All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
-12. `test/health.test.ts`: **(P01)** Backend diagnostic health check and server configuration defaults.
+1. `test/asset-grid-ui.test.ts`: **(P08)** Verifies Grid URL search/filter serialization, defensive deserialization, and column default visibility rules.
+2. `test/asset-list-endpoints.test.ts`: **(P08)** Verifies `GET /api/assets` requireAdmin authentication (401), query preservation, and read-only CSRF exemption.
+3. `test/asset-list-validation.test.ts`: **(P08)** Verifies pagination bounds (1–100), sort allowlists, direction validation, global search trimming (max 100), quick filter shortcuts, filter AST validation (depth <= 2, rules <= 20), and Prisma parameterized `where` and `orderBy` builders.
+4. `test/asset-details-editing.test.ts`: **(P07)** Verifies 9-field general patch allowlist, forbidden field rejection, client validation, no-op detection, NULL normalization, and `/assets/:uuid` route matching.
+5. `test/lookup-client.test.ts`: **(P06)** Verifies `DeviceHealth.name` mapping, complete success, partial catalog failure isolation, pre-existing state retention, and truthful 401/403 status distinction.
+6. `test/asset-form-validation.test.ts`: **(P06)** Verifies model requirement, optional UUID formatting, empty string to NULL normalization (no "N/A" synthesis), and distinct AC Owner vs Current User preservation.
+7. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items, path bindings, and rejection of unapproved screenshot-only navigation items.
+8. `test/asset-validation.test.ts`: **(P04)** Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
+9. `test/asset-endpoints.test.ts`: **(P04)** Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
+10. `test/asset-audit-service.test.ts`: **(P04)** Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
+11. `test/auth-password.test.ts`: **(P03)** Argon2id hash formatting, candidate verification, username and password strength validation.
+12. `test/auth-bootstrap.test.ts`: **(P03)** Password strength enforcement, username validation, single-admin duplicate rejection.
+13. `test/auth-endpoints.test.ts`: **(P03)** Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
+14. `test/database-schema.test.ts`: **(P02)** All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
+15. `test/health.test.ts`: **(P01)** Backend diagnostic health check and server configuration defaults.
 
 ---
 
-## 8. Scope Boundaries & Next Phase Handoff
+## 9. Scope Boundaries & Next Phase Handoff
 
-### Strictly Excluded in Phase P07
-- **No All Assets Registry Grid:** The table/grid listing view is deferred to Phase P08.
+### Strictly Excluded in Phase P08
+- **No Inline Editing or Bulk Updates:** Row cell inline editing and mass mutations are deferred to Phase P09.
 - **No Responsibility Transfers:** Reassignment of `acOwner`, `currentUser`, `department`, or `costCenter` is strictly deferred to Phase P10.
 - **No Physical Verification Creation:** Physical inventory verification workflows belong to Phase P11.
+- **No Excel Import/Export:** Spreadsheet ingestion and export functionality belong to Phase P12.
+- **No Dashboard Analytics:** Metric widgets and aggregated counts belong to Phase P09.
 - **No Schema Changes or Migrations:** Zero modifications to Prisma models, migrations, or database tables.
-- **No Simulated Client Storage:** No fake persistence in `localStorage` or memory stubs pretending to be database saves.
+- **No Fabricated Demo Rows:** Preview mode explicitly preserves zero-data boundaries without mocking fake persistence.
 
-### Handoff to Phase P08 (All Assets Inventory Registry & Search Grid)
-- Stable `/assets/:id` route ready to receive click-through actions from the All Assets inventory grid.
-- Reusable `StatusBadge`, `Panel`, `Button`, and lookup clients.
-- Six approved navigation items in `AppShell` ready to mount the inventory grid at `/assets`.
+### Handoff to Phase P09 (Safe Inline Editing & Dashboard Integration)
+- Fully functioning `AllAssetsView` grid at `/assets` with deep links to `/assets/:id`.
+- Stable `GET /api/assets` endpoint with bounded pagination, sorting, search, and AND/OR filtering ready to support inline cell updates.
+- Six approved navigation items in `AppShell` intact.
+
