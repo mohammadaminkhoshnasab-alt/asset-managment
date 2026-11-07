@@ -353,3 +353,21 @@ model AdminCredential {
 
   @@map("admin_credentials")
 }
+
+// -------------------------------------------------------------
+// Server-Side Session Storage (Phase P03)
+// Additive model for persistent PostgreSQL session storage
+// -------------------------------------------------------------
+
+model Session {
+  id        String   @id @map("id")
+  sid       String   @unique @map("sid")
+  data      String   @map("data")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([expiresAt])
+  @@map("sessions")
+}
+

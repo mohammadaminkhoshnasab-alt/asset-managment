@@ -16,12 +16,16 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:validate": "prisma validate",
+    "admin:bootstrap": "tsx server/scripts/bootstrapAdmin.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.2.2",
     "@prisma/client": "^6.4.1",
+    "@types/express-session": "^1.19.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "express-session": "^1.19.0",
     "prisma": "^6.4.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1"
