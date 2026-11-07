@@ -4,6 +4,7 @@ import { APPROVED_NAVIGATION_ITEMS } from '../../types/navigation.ts';
 import { Sidebar } from './Sidebar.tsx';
 import { Header } from './Header.tsx';
 import { RoutePlaceholder } from '../ui/RoutePlaceholder.tsx';
+import { NewAssetView } from '../assets/NewAssetView.tsx';
 
 export const AppShell: React.FC = () => {
   const [currentRoute, setCurrentRoute] = useState<NavigationRoute>('dashboard');
@@ -31,8 +32,12 @@ export const AppShell: React.FC = () => {
         />
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
-          {/* Active Route Content */}
-          <RoutePlaceholder item={activeNavItem} />
+          {/* Active Route Content: P06 New Asset Workspace or Deferred Route Placeholder */}
+          {currentRoute === 'new-asset' ? (
+            <NewAssetView onNavigate={setCurrentRoute} />
+          ) : (
+            <RoutePlaceholder item={activeNavItem} />
+          )}
         </main>
 
         {/* Industrial Footer matching reference screenshots */}
