@@ -582,7 +582,7 @@ export const NewAssetView: React.FC<NewAssetViewProps> = ({ onNavigate }) => {
                 <option value="">-- Unassigned / Not Specified --</option>
                 {assetTypes.map((type) => (
                   <option key={type.id} value={type.id}>
-                    {type.name} {type.code ? `(${type.code})` : ''}
+                    {type.name}
                   </option>
                 ))}
               </select>

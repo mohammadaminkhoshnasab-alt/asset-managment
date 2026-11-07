@@ -60,28 +60,29 @@ const ASSET_INCLUDE_RELATIONS = {
   currentUser: true,
 } as const;
 
-const ASSET_LIST_RELATIONS = {
+export const ASSET_LIST_RELATIONS: Prisma.AssetInclude = {
   type: {
     select: {
       id: true,
       name: true,
-      code: true,
+      description: true,
     },
   },
   location: {
     select: {
       id: true,
       name: true,
-      code: true,
       building: true,
       floor: true,
       room: true,
+      description: true,
     },
   },
   deviceHealth: {
     select: {
       id: true,
       name: true,
+      description: true,
     },
   },
   acOwner: {
@@ -100,7 +101,7 @@ const ASSET_LIST_RELATIONS = {
       department: true,
     },
   },
-} as const;
+};
 
 /**
  * Core business service for Asset management and append-only transactional audit trail.

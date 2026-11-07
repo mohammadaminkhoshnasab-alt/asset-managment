@@ -1,7 +1,6 @@
 export interface AssetTypeLookup {
   id: string;
   name: string;
-  code?: string | null;
   description?: string | null;
   isActive: boolean;
 }
@@ -9,10 +8,10 @@ export interface AssetTypeLookup {
 export interface LocationLookup {
   id: string;
   name: string;
-  code?: string | null;
   building?: string | null;
   floor?: string | null;
   room?: string | null;
+  description?: string | null;
   isActive: boolean;
 }
 
@@ -165,16 +164,16 @@ export interface AssetListItem {
   currentUserId: string | null;
   createdAt: string;
   updatedAt: string;
-  type?: { id: string; name: string; code?: string | null } | null;
+  type?: { id: string; name: string; description?: string | null } | null;
   location?: {
     id: string;
     name: string;
-    code?: string | null;
     building?: string | null;
     floor?: string | null;
     room?: string | null;
+    description?: string | null;
   } | null;
-  deviceHealth?: { id: string; name: string } | null;
+  deviceHealth?: { id: string; name: string; description?: string | null } | null;
   acOwner?: {
     id: string;
     fullName: string;

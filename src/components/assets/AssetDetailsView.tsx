@@ -714,7 +714,7 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
                 <option value="">-- Unassigned / Not Specified --</option>
                 {catalogs.assetTypes.map((type) => (
                   <option key={type.id} value={type.id}>
-                    {type.name} {type.code ? `(${type.code})` : ''}
+                    {type.name}
                   </option>
                 ))}
               </select>
