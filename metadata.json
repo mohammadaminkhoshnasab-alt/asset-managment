@@ -1,0 +1,6 @@
+{
+  "name": "IT Asset Management System",
+  "description": "Production-oriented IT Asset Management System full-stack foundation",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
