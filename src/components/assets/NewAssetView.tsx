@@ -43,10 +43,11 @@ import {
   Layers,
   ArrowLeft,
   RotateCcw,
+  ExternalLink,
 } from 'lucide-react';
 
 interface NewAssetViewProps {
-  onNavigate: (route: NavigationRoute) => void;
+  onNavigate: (route: NavigationRoute | string) => void;
 }
 
 const INITIAL_FORM_DATA: NewAssetFormData = {
@@ -388,19 +389,30 @@ export const NewAssetView: React.FC<NewAssetViewProps> = ({ onNavigate }) => {
                 Back to Dashboard
               </Button>
 
-              <Button
-                variant="primary"
-                size="md"
-                onClick={() => {
-                  setCreatedAsset(null);
-                  setFormData(INITIAL_FORM_DATA);
-                  setErrors({});
-                  setSubmitError(null);
-                }}
-                leftIcon={<PlusCircle className="w-4 h-4" />}
-              >
-                Register Another Asset
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => onNavigate(`/assets/${createdAsset.id}`)}
+                  leftIcon={<ExternalLink className="w-4 h-4" />}
+                >
+                  View Asset Details
+                </Button>
+
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => {
+                    setCreatedAsset(null);
+                    setFormData(INITIAL_FORM_DATA);
+                    setErrors({});
+                    setSubmitError(null);
+                  }}
+                  leftIcon={<PlusCircle className="w-4 h-4" />}
+                >
+                  Register Another Asset
+                </Button>
+              </div>
             </div>
           </div>
         </Panel>

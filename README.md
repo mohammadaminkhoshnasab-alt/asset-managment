@@ -1,4 +1,4 @@
-# IT Asset Management System — Phase P06 (New Asset Registration)
+# IT Asset Management System — Phase P07 (Asset Details & Controlled Editing)
 
 A production-oriented full-stack IT Asset Management Web Application, designed for independent local deployment on Ubuntu Linux (including WSL2 and private VMs) and developed in Google AI Studio.
 
@@ -6,7 +6,7 @@ A production-oriented full-stack IT Asset Management Web Application, designed f
 
 ## 1. Architecture Overview (Modular Monolith)
 
-This repository implements **Phase P06 — New Asset Registration** on top of the Phase P01 foundation, Phase P02 PostgreSQL data architecture, Phase P03 single-administrator authentication, Phase P04 Core Asset APIs, and Phase P05 Design System & Application Shell. It delivers a polished, responsive hardware asset registration interface at `/assets/new`, integrated with the authenticated `POST /api/assets` endpoint and CSRF protection, while maintaining deferred roadmap boundaries for all other workspaces.
+This repository implements **Phase P07 — Asset Details & Controlled Editing** on top of the Phase P01 foundation, Phase P02 PostgreSQL data architecture, Phase P03 single-administrator authentication, Phase P04 Core Asset APIs, Phase P05 Design System & Application Shell, and Phase P06 New Asset Registration. It delivers an authenticated Asset Details interface at `/assets/:id` with deep linking, browser history support, safe editing of the nine P04-allowlisted general fields, read-only responsibility locks (P10/P11 boundaries), and a paginated immutable Audit History ledger. All other unfinished workspaces remain preserved as roadmap placeholders.
 
 ### Directory Structure
 
@@ -65,13 +65,15 @@ This repository implements **Phase P06 — New Asset Registration** on top of th
 │   ├── index.css             # Tailwind v4 configuration, industrial color palette & custom scrollbars
 │   ├── main.tsx              # React DOM root bootstrapping
 │   ├── components/           # Component library & application shell
-│   │   ├── assets/           # (P06) Hardware asset management workspaces
+│   │   ├── assets/           # (P06/P07) Hardware asset management workspaces
+│   │   │   ├── AssetDetailsView.tsx  # (P07) Real asset details, 9-field safe editor & responsibility locks
+│   │   │   ├── AssetHistoryModal.tsx # (P07) Paginated immutable audit ledger modal & diff viewer
 │   │   │   ├── CreatePersonModal.tsx # Minimal explicit Person creation helper
 │   │   │   └── NewAssetView.tsx      # Polished, responsive New Asset registration form
 │   │   ├── auth/
 │   │   │   └── LoginView.tsx # Industrial dark login card with real auth integration & preview toggle
 │   │   ├── shell/
-│   │   │   ├── AppShell.tsx  # Responsive desktop & mobile application frame
+│   │   │   ├── AppShell.tsx  # Responsive desktop & mobile application frame with /assets/:id deep linking
 │   │   │   ├── Header.tsx    # Telemetry bar, system status, clock, operator identity & logout
 │   │   │   └── Sidebar.tsx   # 6 approved navigation items, active amber badge & operator profile
 │   │   └── ui/
@@ -84,15 +86,17 @@ This repository implements **Phase P06 — New Asset Registration** on top of th
 │   ├── context/
 │   │   └── AuthContext.tsx   # React context for /api/auth/me, /login, /logout & preview inspection
 │   ├── types/
-│   │   ├── asset.ts          # (P06) Asset, lookups (DeviceHealth.name), form state contracts
+│   │   ├── asset.ts          # (P06/P07) Asset details, patch forms, audit events, lookup contracts
 │   │   ├── auth.ts           # AdminUser, AuthStatus, AuthContext contracts
 │   │   └── navigation.ts     # Exactly 6 approved navigation routes & metadata
 │   └── utils/
 │       ├── assetFormValidation.ts # (P06) Form validation and NULL-normalization payload builder
+│       ├── assetPatchValidation.ts # (P07) 9-field allowlist, delta computation, no-op detection & UUID checks
 │       └── lookupClient.ts        # (P06) Granular reference catalog loader and partial-failure handling
 │
 └── test/                     # Test suites (node:test + node:assert)
     ├── asset-audit-service.test.ts # Error mapping, conflict detail & transactional audit tests
+    ├── asset-details-editing.test.ts # (P07) Allowlist, validation, delta computation & route tests
     ├── asset-endpoints.test.ts # Route authentication & method prohibition tests (401, 405)
     ├── asset-form-validation.test.ts # (P06) Client form validation & payload building tests
     ├── asset-validation.test.ts # Asset input validation & forbidden field rejection tests
@@ -318,37 +322,92 @@ Phase P06 replaces the previous `new-asset` route placeholder with a complete, r
 
 ---
 
-## 6. Verification & Test Suite
+## 6. Asset Details & Controlled Editing (Phase P07)
 
-Run the full automated test suite (57 tests across 11 test suites):
+### 6.1 Asset Details View Architecture (`/assets/:id`)
+Phase P07 introduces the authenticated Asset Details and Controlled Editing workspace at `/assets/:id`. Built directly within `AppShell`, this workspace loads a specific hardware asset by its immutable UUID and presents its full operational state while strictly preserving the six approved primary sidebar items:
+
+- **Deep-Link & Navigation Integrity:** Reachable directly by URL (`/assets/:uuid`), page refresh, browser Back/Forward (`popstate`), and via the "View Asset Details" action button on the Phase P06 registration success confirmation.
+- **Real Backend Contract:** Uses authenticated `GET /api/assets/:id` with `credentials: 'include'`.
+- **Honest State Handling:**
+  - `Loading`: Monospace telemetry loader with pulsating indicator.
+  - `401 Unauthorized / 403 Forbidden`: Explicit authentication failure notice with link to login.
+  - `404 Not Found`: Clear missing record notice specifying the queried UUID.
+  - `400 Bad Request`: Invalid UUID syntax warning.
+  - `Preview Inspection Mode`: Renders a non-persistent notification explaining that live asset details require an authenticated administrator session and provisioned PostgreSQL database (no fabricated records).
+
+### 6.2 Structured Information Display & Controlled 9-Field Editor
+Asset records are grouped into structured industrial panels:
+
+1. **Hardware Identification:**
+   - **Internal UUID:** Immutable primary key with copy-to-clipboard button.
+   - **Asset Number:** Internal accounting tag (or `— (NULL)`).
+   - **Serial Number (SN):** Manufacturer hardware serial number (or `— (NULL)`).
+   - **Hardware Model:** Core manufacturer specification.
+2. **Classification & Environmental Status:**
+   - **Asset Type:** Category name (`Laptop`, `Server`, etc.).
+   - **Lifecycle Status:** Semantic status badge (`SPARE`, `IN_USE`, `NEEDS_ATTENTION`, `DISPOSED`).
+   - **Physical Location:** Storage room, rack, or office building.
+   - **Device Health:** Operational condition (`Good`, `Damaged`, etc.).
+3. **Responsibility & Assignment (Locked — P10 Boundary):**
+   - **Accounting Owner (AC Owner):** Displays custodian full name and `personalCode`.
+   - **Current User:** Displays active operator full name and `username`.
+   - **Department & Cost Center:** Organizational allocations.
+   - **P10 Lock Banner:** Clearly displays an industrial warning that custodian transfers and department reassignments belong exclusively to Phase P10 (Transfer Workflows & eForms) and cannot be edited arbitrarily in general maintenance.
+4. **Physical Verification & Timestamps (Locked — P11 Boundary):**
+   - Preserves audit timestamps (`createdAt`, `updatedAt`). Physical verification history and year/month precision audit markers belong to Phase P11.
+5. **Operational Notes:**
+   - **Tag Label:** Searchable descriptive label.
+   - **Audit Comment:** Operational history annotations.
+
+### 6.3 Safe Controlled Edit Mode & Delta Submissions
+Clicking "Edit Details" activates an in-place editing mode strictly restricted to the **nine P04-allowlisted general fields**:
+- `model`, `assetNumber`, `serialNumber`, `typeId`, `locationId`, `deviceHealthId`, `status`, `label`, `comment`.
+- **Forbidden Fields Strictly Omitted:** `id`, `acOwnerId`, `currentUserId`, `department`, `costCenter`, `legacyNewCostCenter`, and verification fields are immutable in general edit mode.
+- **Client Delta Computation (`src/utils/assetPatchValidation.ts`):** Compares form values against original asset state. If no values changed, the system alerts the user that no modifications were detected and avoids sending redundant HTTP requests.
+- **Empty String Normalization:** Blank inputs for optional fields (`assetNumber`, `serialNumber`, `typeId`, `locationId`, `deviceHealthId`, `label`, `comment`) are normalized to `null` to ensure consistent database state.
+- **Transactional Submission:** Emits `PATCH /api/assets/:id` with `x-csrf-token`. Upon success, the backend emits a transactional `ASSET_UPDATED` audit record with before/after diffs and returns the updated asset.
+
+### 6.4 Read-Only Immutable Audit History Ledger (`AssetHistoryModal`)
+- **Quick Audit Glance:** The bottom panel loads the five most recent lifecycle events from `GET /api/assets/:id/history?limit=5&page=1`, displaying the event type (`ASSET_CREATED`, `ASSET_UPDATED`), timestamp, and performing actor.
+- **Full History Modal:** Clicking "View Full History" opens a dedicated modal querying paginated audit logs (`GET /api/assets/:id/history?page=N&limit=10`). It includes full pagination controls, event breakdown, and an expandable before/after field diff table detailing changed attributes.
+
+---
+
+## 7. Verification & Test Suite
+
+Run the full automated test suite (63 tests across 12 test suites):
 
 ```bash
 npm run test
 ```
 
 ### Automated Check Suites:
-1. `test/lookup-client.test.ts`: **(P06)** Verifies `DeviceHealth.name` mapping, complete success, partial catalog failure isolation, pre-existing state retention, and truthful 401/403 status distinction.
-2. `test/asset-form-validation.test.ts`: **(P06)** Verifies model requirement, optional UUID formatting, empty string to NULL normalization (no "N/A" synthesis), and distinct AC Owner vs Current User preservation.
-3. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items, path bindings, and rejection of unapproved screenshot-only navigation items.
-4. `test/asset-validation.test.ts`: **(P04)** Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
-5. `test/asset-endpoints.test.ts`: **(P04)** Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
-6. `test/asset-audit-service.test.ts`: **(P04)** Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
-7. `test/auth-password.test.ts`: **(P03)** Argon2id hash formatting, candidate verification, username and password strength validation.
-8. `test/auth-bootstrap.test.ts`: **(P03)** Password strength enforcement, username validation, single-admin duplicate rejection.
-9. `test/auth-endpoints.test.ts`: **(P03)** Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
-10. `test/database-schema.test.ts`: **(P02)** All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
-11. `test/health.test.ts`: **(P01)** Backend diagnostic health check and server configuration defaults.
+1. `test/asset-details-editing.test.ts`: **(P07)** Verifies 9-field general patch allowlist, forbidden field rejection, client validation, no-op detection, NULL normalization, and `/assets/:uuid` route matching.
+2. `test/lookup-client.test.ts`: **(P06)** Verifies `DeviceHealth.name` mapping, complete success, partial catalog failure isolation, pre-existing state retention, and truthful 401/403 status distinction.
+3. `test/asset-form-validation.test.ts`: **(P06)** Verifies model requirement, optional UUID formatting, empty string to NULL normalization (no "N/A" synthesis), and distinct AC Owner vs Current User preservation.
+4. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items, path bindings, and rejection of unapproved screenshot-only navigation items.
+5. `test/asset-validation.test.ts`: **(P04)** Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
+6. `test/asset-endpoints.test.ts`: **(P04)** Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
+7. `test/asset-audit-service.test.ts`: **(P04)** Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
+8. `test/auth-password.test.ts`: **(P03)** Argon2id hash formatting, candidate verification, username and password strength validation.
+9. `test/auth-bootstrap.test.ts`: **(P03)** Password strength enforcement, username validation, single-admin duplicate rejection.
+10. `test/auth-endpoints.test.ts`: **(P03)** Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
+11. `test/database-schema.test.ts`: **(P02)** All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
+12. `test/health.test.ts`: **(P01)** Backend diagnostic health check and server configuration defaults.
 
 ---
 
-## 7. Scope Boundaries & Next Phase Handoff
+## 8. Scope Boundaries & Next Phase Handoff
 
-### Strictly Excluded in Phase P06
-- **No Later-Phase Modules:** All Assets table/grid (P07 & P08), asset details/editing (P08), transfer workflows & eForms (P10), physical verification audits (P11), Excel batch importer (P12), needs attention discrepancy resolution (P13), executive metrics (P14), system settings & backup (P15).
+### Strictly Excluded in Phase P07
+- **No All Assets Registry Grid:** The table/grid listing view is deferred to Phase P08.
+- **No Responsibility Transfers:** Reassignment of `acOwner`, `currentUser`, `department`, or `costCenter` is strictly deferred to Phase P10.
+- **No Physical Verification Creation:** Physical inventory verification workflows belong to Phase P11.
 - **No Schema Changes or Migrations:** Zero modifications to Prisma models, migrations, or database tables.
 - **No Simulated Client Storage:** No fake persistence in `localStorage` or memory stubs pretending to be database saves.
 
-### Handoff to Phase P07 (All Assets View)
-- Working `/assets/new` asset registration page with server-validated payload generation.
-- Reusable lookup client utility with granular error isolation and `DeviceHealth.name` contract alignment.
-- Six approved navigation items in `AppShell` ready to receive the All Assets grid in Phase P07.
+### Handoff to Phase P08 (All Assets Inventory Registry & Search Grid)
+- Stable `/assets/:id` route ready to receive click-through actions from the All Assets inventory grid.
+- Reusable `StatusBadge`, `Panel`, `Button`, and lookup clients.
+- Six approved navigation items in `AppShell` ready to mount the inventory grid at `/assets`.

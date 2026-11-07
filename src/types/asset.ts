@@ -100,3 +100,47 @@ export interface CreatedAssetRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface AssetDetails extends CreatedAssetRecord {
+  legacyNewCostCenter?: string | null;
+  type?: AssetTypeLookup | null;
+  location?: LocationLookup | null;
+  deviceHealth?: DeviceHealthLookup | null;
+  acOwner?: PersonLookup | null;
+  currentUser?: PersonLookup | null;
+}
+
+export interface PatchAssetFormValues {
+  model: string;
+  assetNumber: string;
+  serialNumber: string;
+  typeId: string;
+  locationId: string;
+  deviceHealthId: string;
+  status: AssetStatusEnum;
+  label: string;
+  comment: string;
+}
+
+export interface AssetAuditEventRecord {
+  id: string;
+  assetId: string;
+  timestamp: string;
+  actor: string;
+  source: string;
+  action: string;
+  operationId?: string | null;
+  changedFields: string[];
+  beforeValues?: Record<string, unknown> | null;
+  afterValues?: Record<string, unknown> | null;
+}
+
+export interface AssetHistoryResponse {
+  events: AssetAuditEventRecord[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}

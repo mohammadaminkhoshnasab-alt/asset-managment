@@ -7,9 +7,10 @@ import { Menu, Clock, LogOut } from 'lucide-react';
 interface HeaderProps {
   currentRoute: NavigationRoute;
   onOpenMobile: () => void;
+  customTitle?: string;
 }
 
-export const Header: React.FC<HeaderProps> = ({ currentRoute, onOpenMobile }) => {
+export const Header: React.FC<HeaderProps> = ({ currentRoute, onOpenMobile, customTitle }) => {
   const { user, logout } = useAuth();
   const [currentTime, setCurrentTime] = useState<string>('');
 
@@ -52,7 +53,7 @@ export const Header: React.FC<HeaderProps> = ({ currentRoute, onOpenMobile }) =>
             //// IT ASSET MANAGEMENT SYSTEM //
           </span>
           <span className="font-mono text-xs text-slate-300 font-semibold px-2 py-0.5 rounded bg-[#131720] border border-[#1f2633] uppercase">
-            {currentItem?.label || 'DASHBOARD'}
+            {customTitle || currentItem?.label || 'DASHBOARD'}
           </span>
         </div>
       </div>
