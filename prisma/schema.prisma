@@ -1,0 +1,355 @@
+// IT Asset Management System — PostgreSQL Prisma Schema
+// Phase P02: PostgreSQL Data Architecture
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -------------------------------------------------------------
+// Enums
+// -------------------------------------------------------------
+
+enum AssetStatus {
+  IN_USE
+  SPARE
+  DISPOSED
+  UNKNOWN
+}
+
+enum TransferStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum AuditSource {
+  UI
+  EXCEL_MIGRATION
+  SYSTEM
+  API
+}
+
+enum DatePrecision {
+  DAY
+  MONTH
+}
+
+enum VerificationOutcome {
+  VERIFIED_MATCH
+  LOCATION_MISMATCH
+  USER_MISMATCH
+  STATUS_MISMATCH
+  NOT_FOUND
+  DAMAGED
+}
+
+enum FollowUpStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CANCELLED
+}
+
+enum FollowUpPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// -------------------------------------------------------------
+// Extensible Lookup Models
+// -------------------------------------------------------------
+
+model AssetType {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  assets Asset[]
+
+  @@map("asset_types")
+}
+
+model Location {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  building    String?
+  floor       String?
+  room        String?
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  assets                 Asset[]
+  transfersFromLocation  AssetTransfer[] @relation("TransferFromLocation")
+  transfersToLocation    AssetTransfer[] @relation("TransferToLocation")
+
+  @@map("locations")
+}
+
+model DeviceHealth {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  assets Asset[]
+
+  @@map("device_health_statuses")
+}
+
+// -------------------------------------------------------------
+// People & Identity Model
+// Preserves AC Owner (responsible person) vs Current Username (actual user)
+// -------------------------------------------------------------
+
+model Person {
+  id           String   @id @default(uuid()) @db.Uuid
+  fullName     String   @map("full_name")
+  personalCode String?  @unique @map("personal_code")
+  username     String?  @unique @map("username")
+  department   String?  @map("department")
+  costCenter   String?  @map("cost_center")
+  email        String?  @map("email")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Distinguishes AC Owner vs Current User on Assets
+  ownedAssets Asset[] @relation("AssetAcOwner")
+  usedAssets  Asset[] @relation("AssetCurrentUser")
+
+  // Transfers to and from people
+  transfersFrom AssetTransfer[] @relation("TransferFromPerson")
+  transfersTo   AssetTransfer[] @relation("TransferToPerson")
+
+  @@index([fullName])
+  @@index([department])
+  @@map("people")
+}
+
+// -------------------------------------------------------------
+// Core Asset Model
+// -------------------------------------------------------------
+
+model Asset {
+  // Immutable internal UUID
+  id String @id @default(uuid()) @db.Uuid
+
+  // Independently unique when non-NULL
+  assetNumber  String? @unique @map("asset_number")
+  serialNumber String? @unique @map("serial_number")
+
+  // Specifications and classification
+  typeId     String?   @map("type_id") @db.Uuid
+  type       AssetType? @relation(fields: [typeId], references: [id], onDelete: SetNull)
+  model      String    @map("model")
+  department String?   @map("department")
+  costCenter String?   @map("cost_center")
+  status     AssetStatus @default(SPARE) @map("status")
+
+  // Relationships to Location and Device Health
+  locationId     String?       @map("location_id") @db.Uuid
+  location       Location?     @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  deviceHealthId String?       @map("device_health_id") @db.Uuid
+  deviceHealth   DeviceHealth? @relation(fields: [deviceHealthId], references: [id], onDelete: SetNull)
+
+  // Labels and descriptions
+  label   String? @map("label")
+  comment String? @map("comment")
+
+  // Distinct Ownership vs Current User
+  acOwnerId     String? @map("ac_owner_id") @db.Uuid
+  acOwner       Person? @relation("AssetAcOwner", fields: [acOwnerId], references: [id], onDelete: SetNull)
+
+  currentUserId String? @map("current_user_id") @db.Uuid
+  currentUser   Person? @relation("AssetCurrentUser", fields: [currentUserId], references: [id], onDelete: SetNull)
+
+  // Legacy field preservable during Excel migration without being permanent mandatory field
+  legacyNewCostCenter String? @map("legacy_new_cost_center")
+
+  // Verification summary cache
+  lastVerifiedAt           DateTime?            @map("last_verified_at")
+  lastVerifiedYearMonth    String?              @map("last_verified_year_month")
+  lastVerificationOutcome  VerificationOutcome? @map("last_verification_outcome")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Related history and audits (Restricted delete to prevent accidental cascade deletion)
+  transfers     AssetTransfer[]
+  auditEvents   AssetAuditEvent[]
+  verifications PhysicalVerification[]
+  followUps     AssetFollowUp[]
+
+  @@index([status])
+  @@index([department])
+  @@index([costCenter])
+  @@map("assets")
+}
+
+// -------------------------------------------------------------
+// Assignment & Transfer History
+// eForm Number can repeat across assets; completed requires non-empty eForm
+// -------------------------------------------------------------
+
+model AssetTransfer {
+  id             String         @id @default(uuid()) @db.Uuid
+  assetId        String         @map("asset_id") @db.Uuid
+  asset          Asset          @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  fromPersonId   String?        @map("from_person_id") @db.Uuid
+  fromPerson     Person?        @relation("TransferFromPerson", fields: [fromPersonId], references: [id], onDelete: SetNull)
+
+  toPersonId     String?        @map("to_person_id") @db.Uuid
+  toPerson       Person?        @relation("TransferToPerson", fields: [toPersonId], references: [id], onDelete: SetNull)
+
+  fromDepartment String?        @map("from_department")
+  toDepartment   String?        @map("to_department")
+
+  fromLocationId String?        @map("from_location_id") @db.Uuid
+  fromLocation   Location?      @relation("TransferFromLocation", fields: [fromLocationId], references: [id], onDelete: SetNull)
+
+  toLocationId   String?        @map("to_location_id") @db.Uuid
+  toLocation     Location?      @relation("TransferToLocation", fields: [toLocationId], references: [id], onDelete: SetNull)
+
+  // eForm Number is NON-UNIQUE and can repeat across multiple assets in a batch transfer
+  eformNumber    String?        @map("eform_number")
+  status         TransferStatus @default(PENDING) @map("status")
+
+  requestedAt    DateTime       @default(now()) @map("requested_at")
+  completedAt    DateTime?      @map("completed_at")
+  cancelledAt    DateTime?      @map("cancelled_at")
+  notes          String?        @map("notes")
+  createdBy      String?        @map("created_by")
+
+  @@index([assetId])
+  @@index([eformNumber])
+  @@index([status])
+  @@map("asset_transfers")
+}
+
+// -------------------------------------------------------------
+// Append-Only Asset Audit Events
+// Restrict delete: no cascading deletion
+// -------------------------------------------------------------
+
+model AssetAuditEvent {
+  id           String      @id @default(uuid()) @db.Uuid
+  assetId      String      @map("asset_id") @db.Uuid
+  asset        Asset       @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  actor        String      @map("actor")
+  source       AuditSource @default(SYSTEM) @map("source")
+  timestamp    DateTime    @default(now()) @map("timestamp")
+
+  // Operation ID groups multiple entity modifications made in a single atomic transaction
+  operationId  String      @map("operation_id") @db.Uuid
+  action       String      @map("action")
+
+  changedFields Json       @map("changed_fields")
+  beforeValues  Json?      @map("before_values")
+  afterValues   Json?      @map("after_values")
+
+  eformNumber  String?     @map("eform_number")
+
+  @@index([assetId, timestamp])
+  @@index([operationId])
+  @@index([eformNumber])
+  @@map("asset_audit_events")
+}
+
+// -------------------------------------------------------------
+// Physical Verification Attempts
+// Preserves month-only vs day-precision without inventing false days
+// -------------------------------------------------------------
+
+model PhysicalVerification {
+  id            String              @id @default(uuid()) @db.Uuid
+  assetId       String              @map("asset_id") @db.Uuid
+  asset         Asset               @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  verifiedBy    String              @map("verified_by")
+  outcome       VerificationOutcome @map("outcome")
+  isSuccessful  Boolean             @default(true) @map("is_successful")
+
+  // Precision model: preserves MONTH precision without inventing day 1
+  datePrecision DatePrecision       @default(DAY) @map("date_precision")
+  verifiedYear  Int                 @map("verified_year")
+  verifiedMonth Int                 @map("verified_month")
+  verifiedDay   Int?                @map("verified_day")
+  verifiedDate  DateTime?           @map("verified_date")
+  verifiedYearMonth String?         @map("verified_year_month")
+
+  notes         String?             @map("notes")
+  createdAt     DateTime            @default(now()) @map("created_at")
+
+  @@index([assetId, verifiedYear, verifiedMonth])
+  @@index([outcome])
+  @@map("physical_verifications")
+}
+
+// -------------------------------------------------------------
+// Asset Follow-ups
+// -------------------------------------------------------------
+
+model AssetFollowUp {
+  id              String           @id @default(uuid()) @db.Uuid
+  assetId         String           @map("asset_id") @db.Uuid
+  asset           Asset            @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  title           String           @map("title")
+  description     String?          @map("description")
+  status          FollowUpStatus   @default(OPEN) @map("status")
+  priority        FollowUpPriority @default(MEDIUM) @map("priority")
+  assignedTo      String?          @map("assigned_to")
+  resolutionNotes String?          @map("resolution_notes")
+
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  resolvedAt      DateTime?        @map("resolved_at")
+
+  @@index([assetId, status])
+  @@index([status, priority])
+  @@map("asset_follow_ups")
+}
+
+// -------------------------------------------------------------
+// Application Settings & Single-Admin Credential Storage
+// (Schema only; no authentication implementation)
+// -------------------------------------------------------------
+
+model AppSetting {
+  key         String   @id @map("key")
+  value       String   @map("value")
+  description String?  @map("description")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
+}
+
+model AdminCredential {
+  id               String    @id @default(uuid()) @db.Uuid
+  username         String    @unique @map("username")
+  passwordHash     String    @map("password_hash")
+  salt             String?   @map("salt")
+  failedAttempts   Int       @default(0) @map("failed_attempts")
+  lockedUntil      DateTime? @map("locked_until")
+  passwordUpdatedAt DateTime @default(now()) @map("password_updated_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@map("admin_credentials")
+}
