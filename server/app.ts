@@ -6,6 +6,9 @@ import { PrismaSessionStore } from './auth/sessionStore.ts';
 import { csrfProtection } from './middleware/csrf.ts';
 import { healthRouter } from './routes/health.ts';
 import { authRouter } from './routes/auth.ts';
+import { assetRouter } from './routes/assets.ts';
+import { lookupRouter, peopleRouter } from './routes/lookups.ts';
+import { requireAdmin } from './middleware/requireAdmin.ts';
 import { errorHandler } from './middleware/errorHandler.ts';
 
 export function createExpressApp(): Express {
@@ -40,8 +43,13 @@ export function createExpressApp(): Express {
   app.use('/health', healthRouter);
   app.use('/api/health', healthRouter);
 
-  // Authentication endpoints
+  // Authentication endpoints (public login, csrf, session management)
   app.use('/api/auth', authRouter);
+
+  // Core Asset Management and Reference APIs (strictly protected behind requireAdmin)
+  app.use('/api/assets', requireAdmin, assetRouter);
+  app.use('/api/lookups', requireAdmin, lookupRouter);
+  app.use('/api/people', requireAdmin, peopleRouter);
 
   // Error handling middleware
   app.use(errorHandler);
