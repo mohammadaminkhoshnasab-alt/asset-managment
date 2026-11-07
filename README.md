@@ -1,4 +1,4 @@
-# IT Asset Management System — Phase P04 (Core Asset API & Transactional Audit)
+# IT Asset Management System — Phase P05 (Design System & Application Shell)
 
 A production-oriented full-stack IT Asset Management Web Application, designed for independent local deployment on Ubuntu Linux (including WSL2 and private VMs) and developed in Google AI Studio.
 
@@ -6,7 +6,7 @@ A production-oriented full-stack IT Asset Management Web Application, designed f
 
 ## 1. Architecture Overview (Modular Monolith)
 
-This repository implements **Phase P04 — Core Asset API & Transactional Audit** on top of the Phase P01 foundation, Phase P02 PostgreSQL data architecture, and Phase P03 single-administrator authentication. It establishes secure, authenticated Asset creation, retrieval, and controlled general patching with atomic PostgreSQL audit events without introducing premature UI screens or unapproved business workflows.
+This repository implements **Phase P05 — Design System & Application Shell** on top of the Phase P01 foundation, Phase P02 PostgreSQL data architecture, Phase P03 single-administrator authentication, and Phase P04 Core Asset APIs. It delivers a modern industrial dark design system, session-aware application shell, authentic Login/Logout frontend integration, and the six approved navigation routes with placeholder boundaries without implementing future business functionality.
 
 ### Directory Structure
 
@@ -60,10 +60,29 @@ This repository implements **Phase P04 — Core Asset API & Transactional Audit*
 │   └── validators/
 │       └── assetValidators.ts # Strict input validation for Asset Create and Patch operations
 │
-├── src/                      # Frontend application (React 19 + TypeScript)
-│   ├── App.tsx               # Minimal neutral application bootstrap
-│   ├── index.css             # Base stylesheet reset
-│   └── main.tsx              # React DOM root bootstrapping
+├── src/                      # Frontend application (React 19 + TypeScript + Tailwind v4)
+│   ├── App.tsx               # Session-aware root component (Auth provider, Login vs AppShell)
+│   ├── index.css             # Tailwind v4 configuration, industrial color palette & custom scrollbars
+│   ├── main.tsx              # React DOM root bootstrapping
+│   ├── components/           # Component library & application shell
+│   │   ├── auth/
+│   │   │   └── LoginView.tsx # Industrial dark login card with real auth integration & preview toggle
+│   │   ├── shell/
+│   │   │   ├── AppShell.tsx  # Responsive desktop & mobile application frame
+│   │   │   ├── Header.tsx    # Telemetry bar, system status, clock, operator identity & logout
+│   │   │   └── Sidebar.tsx   # 6 approved navigation items, active amber badge & operator profile
+│   │   └── ui/
+│   │       ├── Button.tsx    # Industrial button with variants (primary, secondary, outline, ghost, danger)
+│   │       ├── Input.tsx     # Form input with icon slots, validation states & mono styling
+│   │       ├── LoadingState.tsx # Industrial spinner and state loader
+│   │       ├── Panel.tsx     # Charcoal surface card with header tags & action slots
+│   │       ├── RoutePlaceholder.tsx # Strict phase-boundary placeholder with roadmap metadata
+│   │       └── StatusBadge.tsx # Semantic lifecycle indicators (In Use, Spare, Needs Attention, Disposed)
+│   ├── context/
+│   │   └── AuthContext.tsx   # React context for /api/auth/me, /login, /logout & preview inspection
+│   └── types/
+│       ├── auth.ts           # AdminUser, AuthStatus, AuthContext contracts
+│       └── navigation.ts     # Exactly 6 approved navigation routes & metadata
 │
 └── test/                     # Test suites (node:test + node:assert)
     ├── asset-audit-service.test.ts # Error mapping, conflict detail & transactional audit tests
@@ -73,6 +92,7 @@ This repository implements **Phase P04 — Core Asset API & Transactional Audit*
     ├── auth-endpoints.test.ts # Login, logout, me, CSRF, and registration denial tests
     ├── auth-password.test.ts  # Argon2id hashing, verification, and input validation tests
     ├── database-schema.test.ts # Schema integrity, constraints & relationship tests
+    ├── design-system-navigation.test.ts # Navigation contract, 6 approved routes & screenshot filter tests
     └── health.test.ts         # Health check and environment configuration tests
 ```
 
@@ -189,76 +209,88 @@ All asset operations are strictly authenticated behind `requireAdmin` and protec
 
 ---
 
-## 4. Environment Configuration & PostgreSQL Setup
+---
 
-### 4.1 Configuration File (`.env`)
-Copy `.env.example` to `.env`:
+## 4. Design System & Application Shell (Phase P05)
 
-```bash
-cp .env.example .env
-```
+### 4.1 Visual Language & Aesthetic Tokens
+The frontend architecture implements a Modern Industrial Dark Design System inspired by enterprise air-gapped hardware consoles:
+- **Surface Palette:**
+  - Workspace Base: `#0a0c10` (deep charcoal background)
+  - Card & Panel Surface: `#11141c` (elevated container background)
+  - Secondary Elevated Surface: `#181d28` (input controls, active headers)
+  - Border Accents: `#1f2633` (crisp, subtle structural division)
+- **Signature Accent:**
+  - Primary Amber: `#ea8c34` (industrial warning/action amber, warm metallic feel)
+  - Amber Hover: `#d97d26`
+  - Active Tab/Nav Badge: Solid amber fill (`#ea8c34`) with dark contrasting typography (`#020617` / `text-slate-950`)
+- **Typography & Proportions:**
+  - Clean monospace headers for telemetry (`font-mono`, `//// IT ASSET MANAGEMENT SYSTEM //`)
+  - Crisp sans-serif body typography with high contrast readability
+  - Information-dense layouts with clear visual hierarchy, subtle borders, and no pill-shaped decorative bloat
 
-Key environment variables:
-```ini
-# PostgreSQL connection string
-DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/it_asset_management?schema=public"
+### 4.2 Approved Navigation Items (Strict 6-Route Contract)
+The application shell enforces exactly the six approved navigation routes:
+1. **Dashboard** (`/`) — Target Phase: P14 (Executive Dashboard & Metric Telemetry)
+2. **All Assets** (`/assets`) — Target Phase: P08 (Full Asset Inventory Registry & Search)
+3. **New Asset** (`/assets/new`) — Target Phase: P06 (Asset Creation Workflow & Form)
+4. **Import Assets** (`/import`) — Target Phase: P12 (Excel/CSV Batch Importer)
+5. **Needs Attention** (`/attention`) — Target Phase: P09 (Audit & Physical Verification Flags)
+6. **Settings & Backup** (`/settings`) — Target Phase: P15 (System Settings & JSON Backup/Restore)
 
-# Session Security (Required in production, minimum 32 characters)
-SESSION_SECRET="change-this-to-a-secure-random-32-character-secret-in-production"
+*Note on Visual Reference Screenshots:* The attached reference mockups displayed hypothetical tabs ("Employees", "Reports", "User Management"). As strictly mandated by Phase P05 specifications, those features are filtered out and rejected from the navigation system.
 
-# Cookie Security (true behind HTTPS, false on local HTTP development)
-COOKIE_SECURE="false"
+### 4.3 Reusable Component Foundation
+- **`Button`:** Standardized variants (`primary` amber, `secondary`, `outline`, `ghost`, `danger`), sizes (`sm`, `md`, `lg`), with accessible loading spinners and disabled states.
+- **`Input`:** Charcoal form field with optional left/right iconography, monospace numeric formatting, explicit helper text, and high-visibility focus borders.
+- **`Panel`:** Structured card container featuring industrial tag banners, header actions, and consistent padding.
+- **`StatusBadge`:** Semantic lifecycle indicators:
+  - `IN_USE`: Emerald green (`#10b981`)
+  - `SPARE`: Sky blue (`#0284c7`)
+  - `NEEDS_ATTENTION`: Amber (`#ea8c34`)
+  - `DISPOSED`: Rose red (`#f43f5e`)
+- **`LoadingState`:** Hardware telemetry animation with pulsing indicators.
+- **`RoutePlaceholder`:** Clean, non-functional boundary placeholder communicating technical roadmap status and preventing unapproved mock data generation.
 
-# Server Network Configuration (127.0.0.1 default loopback)
-PORT=3000
-HOST="127.0.0.1"
-NODE_ENV="development"
-```
-
-### 4.2 Administrator Bootstrap Command
-Run the interactive provisioning CLI:
-
-```bash
-npm run admin:bootstrap
-```
-
-Or non-interactively via installer environment variable:
-```bash
-ADMIN_BOOTSTRAP_USERNAME="admin" ADMIN_BOOTSTRAP_PASSWORD="MySecurePassword123!" npm run admin:bootstrap
-```
+### 4.4 Authentication & Session Integration
+- **Direct Backend Hook:** Connected directly to Phase P03 endpoints:
+  - `GET /api/auth/me`: Detects active session on initial page load.
+  - `GET /api/auth/csrf`: Retrieves cryptographically signed session CSRF tokens.
+  - `POST /api/auth/login`: Real username/password authentication with lockout warning support.
+  - `POST /api/auth/logout`: Clears backend session and resets client state.
+- **Preview Inspection Mode:** In standalone preview environments where local PostgreSQL is offline, developers can toggle "Preview Inspection Mode" to audit the application shell and design tokens.
 
 ---
 
 ## 5. Verification & Test Suite
 
-Run the full automated test suite (44 tests across 8 test suites):
+Run the full automated test suite (47 tests across 9 test suites):
 
 ```bash
 npm run test
 ```
 
 ### Automated Check Suites:
-1. `test/asset-validation.test.ts`: Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
-2. `test/asset-endpoints.test.ts`: Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
-3. `test/asset-audit-service.test.ts`: Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
-4. `test/auth-password.test.ts`: Argon2id hash formatting, candidate verification, username and password strength validation.
-5. `test/auth-bootstrap.test.ts`: Password strength enforcement, username validation, single-admin duplicate rejection.
-6. `test/auth-endpoints.test.ts`: Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
-7. `test/database-schema.test.ts`: All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
-8. `test/health.test.ts`: Backend diagnostic health check and server configuration defaults.
+1. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items, path bindings, and rejection of unapproved screenshot-only navigation items.
+2. `test/asset-validation.test.ts`: Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
+3. `test/asset-endpoints.test.ts`: Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
+4. `test/asset-audit-service.test.ts`: Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
+5. `test/auth-password.test.ts`: Argon2id hash formatting, candidate verification, username and password strength validation.
+6. `test/auth-bootstrap.test.ts`: Password strength enforcement, username validation, single-admin duplicate rejection.
+7. `test/auth-endpoints.test.ts`: Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
+8. `test/database-schema.test.ts`: All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
+9. `test/health.test.ts`: Backend diagnostic health check and server configuration defaults.
 
 ---
 
 ## 6. Scope Boundaries & Next Phase Handoff
 
-### Strictly Excluded in Phase P04
-- **No UI/UX:** No Asset Grid, New Asset form, Modal, Sidebar, or Design System (P05–P09).
-- **No Transfer / eForm Workflow:** Ownership and assignment workflows deferred to Phase P10.
-- **No Physical Verification Workflow:** Verification logic and outcome history deferred to Phase P11.
-- **No Delete or Bulk Updates:** Asset deletion and mass updates are prohibited.
-- **No Advanced Grid Search/Filtering:** Advanced server-side search and filters deferred to Phase P08.
+### Strictly Excluded in Phase P05
+- **No Business Logic on Navigation Pages:** No charts on Dashboard (P14), no asset table on All Assets (P08), no input form on New Asset (P06), no file upload on Import (P12), no audit engine on Needs Attention (P09), no backup utility on Settings (P15).
+- **No Unapproved Screenshot Tabs:** No "Employees" directory, "Reports" generator, or "User Management" multi-user RBAC.
+- **No Schema or Backend Changes:** Zero modifications to Prisma models, migrations, or Express API endpoints.
 
-### Handoff to Phase P05 (Design System) & Phase P06 (New Asset UI)
-- Fully functional, authenticated REST endpoints (`POST /api/assets`, `GET /api/assets/:id`, `PATCH /api/assets/:id`, `GET /api/assets/:id/history`) ready for frontend consumption.
-- Reference lookup endpoints (`/api/lookups/*` and `/api/people`) ready for form dropdowns and autocomplete.
-- Robust transactional audit logging operating transparently in the background.
+### Handoff to Phase P06 (New Asset UI)
+- Fully functioning `AppShell` with active route state binding.
+- Reusable UI component library (`Button`, `Input`, `Panel`, `StatusBadge`, `LoadingState`).
+- The `/assets/new` route placeholder ready to be swapped with the real Asset Creation form in Phase P06.
