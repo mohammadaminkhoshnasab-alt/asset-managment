@@ -46,6 +46,7 @@ import {
 
 interface AllAssetsViewProps {
   onNavigate: (route: string) => void;
+  onRegisterNavigationGuard?: (guard: (() => boolean) | null) => void;
 }
 
 const ALL_COLUMNS: ColumnDefinition[] = [
@@ -102,7 +103,10 @@ function readInitialStateFromUrl() {
   return { q, page, pageSize, sortBy, sortOrder, quickStatus, filters };
 }
 
-export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
+export const AllAssetsView: React.FC<AllAssetsViewProps> = ({
+  onNavigate,
+  onRegisterNavigationGuard,
+}) => {
   const { status: authStatus, previewMode, csrfToken } = useAuth();
   const initial = useRef(readInitialStateFromUrl());
 
@@ -145,6 +149,27 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
   } | null>(null);
   const [filterOutNotice, setFilterOutNotice] = useState<string | null>(null);
 
+  // Stable refs for unsaved changes guard to eliminate stale closures
+  const isSubmittingRef = useRef(isSubmitting);
+  useEffect(() => {
+    isSubmittingRef.current = isSubmitting;
+  }, [isSubmitting]);
+
+  const editingAssetIdRef = useRef(editingAssetId);
+  useEffect(() => {
+    editingAssetIdRef.current = editingAssetId;
+  }, [editingAssetId]);
+
+  const editFormRef = useRef(editForm);
+  useEffect(() => {
+    editFormRef.current = editForm;
+  }, [editForm]);
+
+  const assetsRef = useRef(assets);
+  useEffect(() => {
+    assetsRef.current = assets;
+  }, [assets]);
+
   // Lookups Catalog State for Inline Form
   const [catalogs, setCatalogs] = useState<LookupCatalogsState>(INITIAL_LOOKUP_STATE);
   const [catalogsLoading, setCatalogsLoading] = useState(false);
@@ -170,17 +195,58 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
     }
   }, [previewMode, authStatus]);
 
-  // Check for unsaved changes before allowing actions that could navigate or alter the view
+  // Robust check for unsaved changes before allowing actions that could navigate or alter the view
   const checkUnsavedChanges = useCallback((): boolean => {
-    if (!editingAssetId || !editForm) return true;
-    const current = assets.find((a) => a.id === editingAssetId);
-    if (!current) return true;
-    const delta = computePatchDelta(current, editForm);
-    if (!delta.hasChanges) return true;
-    return window.confirm(
+    if (isSubmittingRef.current) {
+      window.alert('Cannot navigate or change view while a save operation is in progress. Please wait.');
+      return false;
+    }
+    if (!editingAssetIdRef.current || !editFormRef.current) {
+      return true;
+    }
+    const current = assetsRef.current.find((a) => a.id === editingAssetIdRef.current);
+    if (!current) {
+      setEditingAssetId(null);
+      setEditForm(null);
+      setEditErrors({});
+      editingAssetIdRef.current = null;
+      editFormRef.current = null;
+      return true;
+    }
+    const delta = computePatchDelta(current, editFormRef.current);
+    if (!delta.hasChanges) {
+      setEditingAssetId(null);
+      setEditForm(null);
+      setEditErrors({});
+      editingAssetIdRef.current = null;
+      editFormRef.current = null;
+      return true;
+    }
+    const confirmed = window.confirm(
       'You have unsaved changes to the currently edited asset. Discard these modifications?'
     );
-  }, [editingAssetId, editForm, assets]);
+    if (confirmed) {
+      setEditingAssetId(null);
+      setEditForm(null);
+      setEditErrors({});
+      editingAssetIdRef.current = null;
+      editFormRef.current = null;
+      return true;
+    }
+    return false;
+  }, []);
+
+  // Register central navigation guard with AppShell
+  useEffect(() => {
+    if (onRegisterNavigationGuard) {
+      onRegisterNavigationGuard(checkUnsavedChanges);
+    }
+    return () => {
+      if (onRegisterNavigationGuard) {
+        onRegisterNavigationGuard(null);
+      }
+    };
+  }, [onRegisterNavigationGuard, checkUnsavedChanges]);
 
   // Debounce search input
   useEffect(() => {
@@ -223,17 +289,10 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
   // Handle browser back/forward buttons (protect unsaved edits)
   useEffect(() => {
     const handlePopState = () => {
-      if (editingAssetId && editForm) {
-        const current = assets.find((a) => a.id === editingAssetId);
-        if (current && computePatchDelta(current, editForm).hasChanges) {
-          if (!window.confirm('You have unsaved modifications. Discard and navigate?')) {
-            syncStateToUrl();
-            return;
-          }
-        }
+      if (!checkUnsavedChanges()) {
+        syncStateToUrl();
+        return;
       }
-      setEditingAssetId(null);
-      setEditForm(null);
 
       const state = readInitialStateFromUrl();
       setSearchQuery(state.q);
@@ -248,7 +307,7 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [editingAssetId, editForm, assets, syncStateToUrl]);
+  }, [checkUnsavedChanges, syncStateToUrl]);
 
   // Warn on page unload if changes are unsaved
   useEffect(() => {
@@ -381,8 +440,7 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
     if (editingAssetId === asset.id) return;
     if (!checkUnsavedChanges()) return;
 
-    setEditingAssetId(asset.id);
-    setEditForm({
+    const initialValues: PatchAssetFormValues = {
       model: asset.model,
       assetNumber: asset.assetNumber || '',
       serialNumber: asset.serialNumber || '',
@@ -392,7 +450,13 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
       status: asset.status,
       label: asset.label || '',
       comment: asset.comment || '',
-    });
+    };
+
+    setEditingAssetId(asset.id);
+    setEditForm(initialValues);
+    editingAssetIdRef.current = asset.id;
+    editFormRef.current = initialValues;
+
     setEditErrors({});
     setSubmitFeedback(null);
     setFilterOutNotice(null);
@@ -404,6 +468,8 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
     if (!editingAssetId || !editForm) {
       setEditingAssetId(null);
       setEditForm(null);
+      editingAssetIdRef.current = null;
+      editFormRef.current = null;
       return;
     }
     const current = assets.find((a) => a.id === editingAssetId);
@@ -419,12 +485,19 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
     setEditForm(null);
     setEditErrors({});
     setSubmitFeedback(null);
+    editingAssetIdRef.current = null;
+    editFormRef.current = null;
   };
 
   // Phase P09: Field Change
   const handleFieldChange = (field: keyof PatchAssetFormValues, value: string) => {
     if (!editForm) return;
-    setEditForm((prev) => (prev ? { ...prev, [field]: value } : null));
+    setEditForm((prev) => {
+      if (!prev) return null;
+      const updated = { ...prev, [field]: value };
+      editFormRef.current = updated;
+      return updated;
+    });
     if (editErrors[field]) {
       setEditErrors((prev) => ({ ...prev, [field]: '' }));
     }
@@ -456,6 +529,8 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
       });
       setEditingAssetId(null);
       setEditForm(null);
+      editingAssetIdRef.current = null;
+      editFormRef.current = null;
       return;
     }
 
@@ -493,10 +568,12 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
         const savedId = editingAssetId;
         const savedModel = editForm.model;
 
-        // Reset edit mode
+        // Reset edit mode now that server has committed the update
         setEditingAssetId(null);
         setEditForm(null);
         setEditErrors({});
+        editingAssetIdRef.current = null;
+        editFormRef.current = null;
 
         // Refresh authoritative list while preserving search, filters, sorting, page
         const prevParams = new URLSearchParams();
@@ -510,29 +587,43 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
           prevParams.set('filters', JSON.stringify(advancedFilters));
         }
 
-        const freshRes = await fetch(`/api/assets?${prevParams.toString()}`, {
-          method: 'GET',
-          credentials: 'include',
-        });
+        try {
+          const freshRes = await fetch(`/api/assets?${prevParams.toString()}`, {
+            method: 'GET',
+            credentials: 'include',
+          });
 
-        if (freshRes.ok) {
-          const freshJson: AssetListResponse = await freshRes.json();
-          setAssets(freshJson.data || []);
-          setTotalCount(freshJson.pagination.total);
-          setTotalPages(freshJson.pagination.totalPages);
+          if (freshRes.ok) {
+            const freshJson: AssetListResponse = await freshRes.json();
+            setAssets(freshJson.data || []);
+            setTotalCount(freshJson.pagination.total);
+            setTotalPages(freshJson.pagination.totalPages);
 
-          // Check if saved item moved out of active filters
-          const stillInResults = freshJson.data?.some((item) => item.id === savedId);
-          if (!stillInResults && (debouncedSearch || quickStatus || (advancedFilters && advancedFilters.rules.length > 0))) {
-            setFilterOutNotice(
-              `Asset '${savedModel}' was updated successfully in PostgreSQL. Due to active search/filter criteria, it is no longer visible in this view.`
-            );
+            // Check if saved item moved out of active filters
+            const stillInResults = freshJson.data?.some((item) => item.id === savedId);
+            if (!stillInResults && (debouncedSearch || quickStatus || (advancedFilters && advancedFilters.rules.length > 0))) {
+              setFilterOutNotice(
+                `Asset '${savedModel}' was updated successfully in PostgreSQL. Due to active search/filter criteria, it is no longer visible in this view.`
+              );
+            } else {
+              setSubmitFeedback({
+                type: 'success',
+                message: `Asset '${savedModel}' updated successfully. Transactional audit event recorded.`,
+              });
+            }
           } else {
+            // Succeeded on server, but GET refresh returned non-OK status
             setSubmitFeedback({
-              type: 'success',
-              message: `Asset '${savedModel}' updated successfully. Transactional audit event recorded.`,
+              type: 'info',
+              message: `Asset '${savedModel}' saved on server; refresh not verified (status ${freshRes.status}). Use the REFRESH button to re-sync grid.`,
             });
           }
+        } catch {
+          // Network issue during refresh attempt
+          setSubmitFeedback({
+            type: 'info',
+            message: `Asset '${savedModel}' saved on server; refresh not verified (network error during refresh). Use the REFRESH button to re-sync grid.`,
+          });
         }
         return;
       }
@@ -700,14 +791,29 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
             )}
             <span>{submitFeedback.message}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => setSubmitFeedback(null)}
-            className="text-slate-400 hover:text-white font-bold p-1 cursor-pointer"
-            title="Dismiss feedback"
-          >
-            ×
-          </button>
+          <div className="flex items-center gap-2">
+            {submitFeedback.message.includes('refresh not verified') && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  fetchAssets();
+                }}
+                disabled={isLoading}
+                leftIcon={<RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />}
+              >
+                RELOAD GRID
+              </Button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSubmitFeedback(null)}
+              className="text-slate-400 hover:text-white font-bold p-1 cursor-pointer"
+              title="Dismiss feedback"
+            >
+              ×
+            </button>
+          </div>
         </div>
       )}
 
@@ -1360,8 +1466,10 @@ export const AllAssetsView: React.FC<AllAssetsViewProps> = ({ onNavigate }) => {
         isOpen={showFilterModal}
         initialFilters={advancedFilters}
         onApply={(filters) => {
+          if (!checkUnsavedChanges()) return false;
           setAdvancedFilters(filters);
           setPage(1);
+          return true;
         }}
         onClose={() => setShowFilterModal(false)}
       />

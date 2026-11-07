@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { NavigationRoute } from '../../types/navigation.ts';
 import { APPROVED_NAVIGATION_ITEMS } from '../../types/navigation.ts';
 import { Sidebar } from './Sidebar.tsx';
@@ -45,9 +45,34 @@ export const AppShell: React.FC = () => {
   );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
+  // Central Navigation Guard registered by active child views (e.g. AllAssetsView inline editor)
+  const navigationGuardRef = useRef<(() => boolean) | null>(null);
+
+  const registerNavigationGuard = useCallback((guard: (() => boolean) | null) => {
+    navigationGuardRef.current = guard;
+  }, []);
+
   // Sync state with browser Back/Forward (popstate)
   useEffect(() => {
     const handlePopState = () => {
+      if (navigationGuardRef.current) {
+        const canProceed = navigationGuardRef.current();
+        if (!canProceed) {
+          // User declined discard; re-push active URL to prevent browser history desync
+          const currentPath = activeAssetId
+            ? `/assets/${activeAssetId}`
+            : currentRoute === 'new-asset'
+            ? '/assets/new'
+            : currentRoute === 'assets'
+            ? window.location.pathname.startsWith('/assets')
+              ? window.location.pathname + window.location.search
+              : '/assets'
+            : `/${currentRoute}`;
+          window.history.pushState({}, '', currentPath);
+          return;
+        }
+      }
+
       const parsed = parseRouteFromLocation();
       setCurrentRoute(parsed.route);
       setActiveAssetId(parsed.assetId);
@@ -55,22 +80,29 @@ export const AppShell: React.FC = () => {
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [currentRoute, activeAssetId]);
 
-  const handleNavigate = useCallback((target: NavigationRoute | string) => {
+  const handleNavigate = useCallback((target: NavigationRoute | string): boolean => {
+    if (navigationGuardRef.current) {
+      const canProceed = navigationGuardRef.current();
+      if (!canProceed) {
+        return false; // Navigation blocked by active view guard
+      }
+    }
+
     if (typeof target === 'string' && target.startsWith('/assets/')) {
       const sub = target.replace('/assets/', '');
       if (sub === 'new') {
         window.history.pushState({}, '', '/assets/new');
         setCurrentRoute('new-asset');
         setActiveAssetId(null);
-        return;
+        return true;
       }
       // Target is an individual asset UUID
       window.history.pushState({}, '', `/assets/${sub}`);
       setCurrentRoute('assets');
       setActiveAssetId(sub);
-      return;
+      return true;
     }
 
     // Standard NavigationRoute
@@ -80,6 +112,7 @@ export const AppShell: React.FC = () => {
     window.history.pushState({}, '', targetPath);
     setCurrentRoute(route);
     setActiveAssetId(null);
+    return true;
   }, []);
 
   const activeNavItem =
@@ -114,7 +147,10 @@ export const AppShell: React.FC = () => {
           ) : currentRoute === 'new-asset' ? (
             <NewAssetView onNavigate={handleNavigate} />
           ) : currentRoute === 'assets' ? (
-            <AllAssetsView onNavigate={handleNavigate} />
+            <AllAssetsView
+              onNavigate={handleNavigate}
+              onRegisterNavigationGuard={registerNavigationGuard}
+            />
           ) : (
             <RoutePlaceholder item={activeNavItem} />
           )}

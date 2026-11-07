@@ -6,7 +6,7 @@ import { Button } from '../ui/Button.tsx';
 interface AdvancedFilterBuilderProps {
   isOpen: boolean;
   initialFilters?: GridFilterGroup;
-  onApply: (filters?: GridFilterGroup) => void;
+  onApply: (filters?: GridFilterGroup) => boolean | void;
   onClose: () => void;
 }
 
@@ -182,8 +182,10 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
     };
 
     const finalGroup = cleanGroup(rootGroup);
-    onApply(finalGroup || undefined);
-    onClose();
+    const result = onApply(finalGroup || undefined);
+    if (result !== false) {
+      onClose();
+    }
   };
 
   const handleReset = () => {
@@ -191,8 +193,10 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
       operator: 'AND',
       rules: [],
     });
-    onApply(undefined);
-    onClose();
+    const result = onApply(undefined);
+    if (result !== false) {
+      onClose();
+    }
   };
 
   return (

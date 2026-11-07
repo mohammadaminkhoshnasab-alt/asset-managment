@@ -15,7 +15,7 @@ import {
 
 interface SidebarProps {
   currentRoute: NavigationRoute;
-  onNavigate: (route: NavigationRoute) => void;
+  onNavigate: (route: NavigationRoute) => boolean | void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -92,8 +92,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={item.id}
               onClick={() => {
-                onNavigate(item.id);
-                onCloseMobile();
+                const navigated = onNavigate(item.id);
+                if (navigated !== false) {
+                  onCloseMobile();
+                }
               }}
               className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 cursor-pointer select-none group ${
                 isActive
