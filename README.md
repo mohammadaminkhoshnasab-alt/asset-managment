@@ -1,12 +1,12 @@
 # IT Asset Management System — Phase P01 (Project Foundation)
 
-A production-oriented IT Asset Management Web Application foundation designed for local standalone deployment on Ubuntu Linux (including WSL2 and private VMs) and development in Google AI Studio.
+A clean, minimal, production-oriented full-stack project foundation for the IT Asset Management Web Application, designed for independent local deployment on Ubuntu Linux (including WSL2 and private VMs) and development in Google AI Studio.
 
 ---
 
 ## 1. Architecture Overview (Modular Monolith)
 
-This repository implements **Phase P01 — Project Foundation**. It establishes a full-stack Modular Monolith architecture separating the client-side single-page application and the server-side API application while supporting unified development and standalone production execution.
+This repository implements **Phase P01 — Project Foundation**. It establishes a full-stack Modular Monolith architecture separating client-side and server-side code without introducing premature application features, design systems, or database models.
 
 ### Directory Structure
 
@@ -14,25 +14,26 @@ This repository implements **Phase P01 — Project Foundation**. It establishes 
 ├── .env.example              # Non-secret environment variable template
 ├── .gitignore                # Source control exclusions
 ├── index.html                # HTML entry point (title, meta, root mount)
-├── metadata.json             # AI Studio applet configuration and capabilities
-├── package.json              # Project manifests, dependencies, and lifecycle scripts
-├── tsconfig.json             # TypeScript compiler configuration
+├── metadata.json             # AI Studio applet metadata
+├── package.json              # Project manifest and lifecycle scripts
+├── package-lock.json         # Deterministic npm dependency lockfile
+├── tsconfig.json             # TypeScript compiler configuration (client, server, test)
 ├── vite.config.ts            # Vite client bundler and plugin configuration
-├── server.ts                 # Full-stack runtime entry point (dev middleware / prod static)
+├── server.ts                 # Full-stack entry point (dev middleware / prod static)
 ├── README.md                 # Foundation documentation (this file)
 │
 ├── server/                   # Backend application (Node.js + Express + TypeScript)
-│   ├── app.ts                # Express application factory, routing & middleware assembly
+│   ├── app.ts                # Express application factory, routing & error middleware
 │   ├── config/
-│   │   └── environment.ts    # Typed environment configuration loader with safe defaults
+│   │   └── environment.ts    # Typed environment configuration loader with safe local defaults
 │   ├── middleware/
 │   │   └── errorHandler.ts   # Centralized error handling middleware
 │   └── routes/
 │       └── health.ts         # Diagnostic GET /health endpoint
 │
 ├── src/                      # Frontend application (React 19 + TypeScript)
-│   ├── App.tsx               # Minimal neutral application scaffold
-│   ├── index.css             # Tailwind CSS entry point
+│   ├── App.tsx               # Minimal neutral application bootstrap
+│   ├── index.css             # Base stylesheet reset
 │   └── main.tsx              # React DOM root bootstrapping
 │
 └── test/                     # Foundation unit tests (node:test + node:assert)
@@ -41,22 +42,33 @@ This repository implements **Phase P01 — Project Foundation**. It establishes 
 
 ---
 
-## 2. Core Frameworks & Tooling
+## 2. Core Frameworks & Dependencies
 
-- **Frontend Runtime:** React 19 (`react: ^19.0.1`, `react-dom: ^19.0.1`)
-- **Backend Runtime:** Node.js v22+ with Express (`express: ^4.21.2`, `@types/express: ^4.17.21`)
-- **Language & Type System:** TypeScript (`typescript: ^7.0.2`, `@types/node: ^22.14.0`)
-- **Bundler & Client Dev Server:** Vite 8 (`vite: ^8.3.0`, `@vitejs/plugin-react: ^6.1.1`)
-- **Server Bundler:** esbuild (`esbuild: ^0.25.0`)
-- **TypeScript Dev Execution:** tsx (`tsx: ^4.21.0`)
-- **Styling Pipeline:** Tailwind CSS v4 (`@tailwindcss/vite: ^4.3.3`, `tailwindcss: ^4.3.3`)
-- **Test Runner:** Node.js built-in test runner (`node:test`, `node:assert/strict`)
+All dependencies are strictly limited to the minimal foundation requirements:
+
+### Runtime Dependencies (`dependencies`)
+- `dotenv` (`^17.2.3`): Environment configuration loading
+- `express` (`^4.21.2`): Backend HTTP routing and middleware framework
+- `react` (`^19.0.1`): Frontend UI library
+- `react-dom` (`^19.0.1`): React DOM renderer
+
+### Development Tooling (`devDependencies`)
+- `typescript` (`^7.0.2`): TypeScript language and type checking (`tsc --noEmit`)
+- `@types/node` (`^22.14.0`): Node.js type definitions
+- `@types/express` (`^4.17.21`): Express type definitions
+- `@types/react` (`^19.3.0`), `@types/react-dom` (`^19.3.0`): React type definitions
+- `vite` (`^8.3.0`): Client-side bundler and dev server
+- `@vitejs/plugin-react` (`^6.1.1`): React plugin for Vite
+- `esbuild` (`^0.28.0`): Standalone server-side bundler
+- `tsx` (`^4.21.0`): TypeScript execution engine for dev server and test runner
+
+*No external UI component libraries, animation packages, AI SDKs, or CSS frameworks are included in this foundation.*
 
 ---
 
-## 3. Environment Configuration
+## 3. Environment Configuration & Network Binding
 
-Copy `.env.example` to `.env` to customize settings:
+Copy `.env.example` to `.env` to configure settings:
 
 ```bash
 cp .env.example .env
@@ -65,30 +77,32 @@ cp .env.example .env
 | Variable | Default Value | Description |
 |---|---|---|
 | `PORT` | `3000` | Port on which the HTTP server listens. |
-| `HOST` | `0.0.0.0` | Network interface to bind (`0.0.0.0` or `127.0.0.1`). |
-| `NODE_ENV` | `development` | Runtime mode: `development` (with Vite middleware) or `production`. |
+| `HOST` | `127.0.0.1` | Network interface binding. Defaults strictly to local loopback. |
+| `NODE_ENV` | `development` | Runtime mode: `development` (with Vite dev middleware) or `production`. |
 
-*Note: No secrets or credentials exist in this phase. Database connection parameters are deferred to Phase P02.*
+### Network Binding Policy
+- **Local Loopback (Default):** By default, `HOST` is `127.0.0.1`, restricting connections strictly to the local machine.
+- **Private Network Binding (Opt-In):** To expose the application on a local private network or container interface, explicitly set `HOST="0.0.0.0"` in `.env`.
 
 ---
 
 ## 4. Lifecycle Commands
 
-All commands run through standard `npm` scripts:
+All package operations use **npm** and are locked with `package-lock.json`:
 
-### Dependency Installation
+### Clean Dependency Installation
 ```bash
-npm install
+npm ci
 ```
 
 ### Development Mode (Full-Stack)
-Starts the Express server with Vite dev middleware enabled, binding to the configured host and port (default: `http://localhost:3000`):
+Starts the Express server with Vite dev middleware on `http://127.0.0.1:3000`:
 ```bash
 npm run dev
 ```
 
-### Type Checking & Linting
-Validates TypeScript syntax and type safety without emitting build files:
+### Type Checking
+Validates TypeScript syntax and type safety across client, server, and test code:
 ```bash
 npm run typecheck
 # or
@@ -96,7 +110,7 @@ npm run lint
 ```
 
 ### Unit Tests
-Executes the foundation test suite with Node's native test runner:
+Executes the foundation test suite with Node's built-in test runner:
 ```bash
 npm run test
 ```
@@ -120,40 +134,37 @@ NODE_ENV=production node dist/server.js
 ## 5. Verification & Health Checks
 
 ### Backend Health Endpoint
-The backend exposes `GET /health`:
+The backend exposes `GET /health` (and alias `GET /api/health`):
 
 ```bash
-curl -i http://localhost:3000/health
+curl -i http://127.0.0.1:3000/health
 ```
 
-**Expected Response (HTTP 200 OK):**
+**Response (HTTP 200 OK):**
 ```json
 {
   "status": "ok",
   "service": "it-asset-management-backend",
   "phase": "P01 - Foundation",
-  "uptime": 12.345,
-  "timestamp": "2026-11-07T14:14:43.824Z"
+  "uptime": 2.41,
+  "timestamp": "2026-11-07T14:56:08.370Z"
 }
 ```
 *Note: This endpoint strictly reports process availability; it does not claim database connectivity or authentication readiness.*
 
-### Frontend Initialization
-When accessing `http://localhost:3000/` in a browser:
-- React 19 boots inside `#root`.
-- A neutral scaffold status card confirms frontend and backend initialization.
-- No business logic, mock data, or product screens are rendered.
+### Frontend Bootstrap Verification
+When accessing `http://127.0.0.1:3000/` in a browser, React 19 boots inside `#root` and renders a minimal neutral header confirming initialization.
 
 ---
 
 ## 6. Scope Boundaries & Next Phase Handoff
 
 ### Strictly Excluded in Phase P01
-- **Database:** No PostgreSQL tables, ORM models, migrations, seeds, or active DB connections.
+- **Database:** No PostgreSQL tables, ORM models, migrations, seeds, or active connections.
 - **Application Features:** No Asset CRUD, transfers, eForms, audit logs, verification, Excel import/export, data grids, or reports.
 - **UI/UX:** No Admin Dashboard, Login forms, sidebars, navigation bars, or design systems.
 - **Security:** No authentication, sessions, or user management.
-- **External Services:** No Google Cloud, Gemini API, or 3rd-party vendor dependencies.
+- **External Services:** No Google Cloud, Gemini API, or third-party vendor dependencies.
 
 ### Handoff to Phase P02
-- Clean Modular Monolith layout ready for PostgreSQL schema, Drizzle/Prisma models, and database migration architecture in Phase P02.
+- Clean Modular Monolith layout ready for PostgreSQL schema, migration tooling, and repository architecture in Phase P02.

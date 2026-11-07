@@ -11,7 +11,8 @@ export interface ServerConfig {
 
 export function getServerConfig(): ServerConfig {
   const port = parseInt(process.env.PORT || '3000', 10);
-  const host = process.env.HOST || '0.0.0.0';
+  // Default host is strictly local loopback (127.0.0.1). Binding to 0.0.0.0 is an explicit opt-in.
+  const host = process.env.HOST || '127.0.0.1';
   const nodeEnv = process.env.NODE_ENV || 'development';
 
   return {

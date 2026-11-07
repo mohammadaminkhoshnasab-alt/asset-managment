@@ -8,7 +8,7 @@ test('environment configuration provides sensible defaults', () => {
   const config = getServerConfig();
   assert.equal(typeof config.port, 'number');
   assert.ok(config.port > 0);
-  assert.equal(typeof config.host, 'string');
+  assert.equal(config.host, '127.0.0.1');
   assert.equal(typeof config.nodeEnv, 'string');
 });
 
