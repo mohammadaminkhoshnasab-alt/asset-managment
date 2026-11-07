@@ -1,4 +1,4 @@
-# IT Asset Management System — Phase P05 (Design System & Application Shell)
+# IT Asset Management System — Phase P06 (New Asset Registration)
 
 A production-oriented full-stack IT Asset Management Web Application, designed for independent local deployment on Ubuntu Linux (including WSL2 and private VMs) and developed in Google AI Studio.
 
@@ -6,7 +6,7 @@ A production-oriented full-stack IT Asset Management Web Application, designed f
 
 ## 1. Architecture Overview (Modular Monolith)
 
-This repository implements **Phase P05 — Design System & Application Shell** on top of the Phase P01 foundation, Phase P02 PostgreSQL data architecture, Phase P03 single-administrator authentication, and Phase P04 Core Asset APIs. It delivers a modern industrial dark design system, session-aware application shell, authentic Login/Logout frontend integration, and the six approved navigation routes with placeholder boundaries without implementing future business functionality.
+This repository implements **Phase P06 — New Asset Registration** on top of the Phase P01 foundation, Phase P02 PostgreSQL data architecture, Phase P03 single-administrator authentication, Phase P04 Core Asset APIs, and Phase P05 Design System & Application Shell. It delivers a polished, responsive hardware asset registration interface at `/assets/new`, integrated with the authenticated `POST /api/assets` endpoint and CSRF protection, while maintaining deferred roadmap boundaries for all other workspaces.
 
 ### Directory Structure
 
@@ -65,6 +65,9 @@ This repository implements **Phase P05 — Design System & Application Shell** o
 │   ├── index.css             # Tailwind v4 configuration, industrial color palette & custom scrollbars
 │   ├── main.tsx              # React DOM root bootstrapping
 │   ├── components/           # Component library & application shell
+│   │   ├── assets/           # (P06) Hardware asset management workspaces
+│   │   │   ├── CreatePersonModal.tsx # Minimal explicit Person creation helper
+│   │   │   └── NewAssetView.tsx      # Polished, responsive New Asset registration form
 │   │   ├── auth/
 │   │   │   └── LoginView.tsx # Industrial dark login card with real auth integration & preview toggle
 │   │   ├── shell/
@@ -80,20 +83,26 @@ This repository implements **Phase P05 — Design System & Application Shell** o
 │   │       └── StatusBadge.tsx # Semantic lifecycle indicators (In Use, Spare, Needs Attention, Disposed)
 │   ├── context/
 │   │   └── AuthContext.tsx   # React context for /api/auth/me, /login, /logout & preview inspection
-│   └── types/
-│       ├── auth.ts           # AdminUser, AuthStatus, AuthContext contracts
-│       └── navigation.ts     # Exactly 6 approved navigation routes & metadata
+│   ├── types/
+│   │   ├── asset.ts          # (P06) Asset, lookups (DeviceHealth.name), form state contracts
+│   │   ├── auth.ts           # AdminUser, AuthStatus, AuthContext contracts
+│   │   └── navigation.ts     # Exactly 6 approved navigation routes & metadata
+│   └── utils/
+│       ├── assetFormValidation.ts # (P06) Form validation and NULL-normalization payload builder
+│       └── lookupClient.ts        # (P06) Granular reference catalog loader and partial-failure handling
 │
 └── test/                     # Test suites (node:test + node:assert)
     ├── asset-audit-service.test.ts # Error mapping, conflict detail & transactional audit tests
     ├── asset-endpoints.test.ts # Route authentication & method prohibition tests (401, 405)
+    ├── asset-form-validation.test.ts # (P06) Client form validation & payload building tests
     ├── asset-validation.test.ts # Asset input validation & forbidden field rejection tests
     ├── auth-bootstrap.test.ts # Single-admin bootstrap and idempotency tests
     ├── auth-endpoints.test.ts # Login, logout, me, CSRF, and registration denial tests
     ├── auth-password.test.ts  # Argon2id hashing, verification, and input validation tests
     ├── database-schema.test.ts # Schema integrity, constraints & relationship tests
     ├── design-system-navigation.test.ts # Navigation contract, 6 approved routes & screenshot filter tests
-    └── health.test.ts         # Health check and environment configuration tests
+    ├── health.test.ts         # Health check and environment configuration tests
+    └── lookup-client.test.ts  # (P06) Lookup catalogs, partial failure & DeviceHealth.name tests
 ```
 
 ---
@@ -262,35 +271,84 @@ The application shell enforces exactly the six approved navigation routes:
 
 ---
 
-## 5. Verification & Test Suite
+## 5. New Asset Registration Interface (Phase P06)
 
-Run the full automated test suite (47 tests across 9 test suites):
+### 5.1 Registration Form Architecture (`/assets/new`)
+Phase P06 replaces the previous `new-asset` route placeholder with a complete, responsive asset registration interface built inside `AppShell` using the Modern Industrial Dark design tokens. Fields are organized into four cohesive functional sections:
+
+1. **Hardware Identification (Core Identifiers):**
+   - **`model` (Required):** Non-empty hardware equipment specification or manufacturer model name.
+   - **`assetNumber` (Optional):** Internal accounting tag. Completely independent from the Serial Number. Empty values are sent as `null` (never synthesized placeholders such as `"N/A"`).
+   - **`serialNumber` (Optional):** Manufacturer Serial Number (SN). Completely independent from Asset Number. Empty values are sent as `null`.
+2. **Classification & Condition:**
+   - **`typeId` (Optional):** Foreign-key UUID selected from `GET /api/lookups/asset-types`.
+   - **`status` (Required, default `SPARE`):** Validated against `VALID_ASSET_STATUSES` (`SPARE`, `IN_USE`, `DISPOSED`, `UNKNOWN`) with real-time semantic status badges.
+   - **`locationId` (Optional):** Foreign-key UUID selected from `GET /api/lookups/locations`.
+   - **`deviceHealthId` (Optional):** Foreign-key UUID selected from `GET /api/lookups/device-health`. Aligned with the backend `DeviceHealth.name` property.
+3. **Initial Assignment & Organization:**
+   - **`acOwnerId` (Optional):** Officially responsible custodian selected from `GET /api/people`. When selected, the person's `personalCode` is displayed as associated metadata (never confused with system username or used as an independent asset identifier).
+   - **`currentUserId` (Optional):** Actual system operator selected from `GET /api/people`. Selection is independent of `acOwnerId`.
+   - **`department` & `costCenter` (Optional):** Text allocations established at initial registration.
+   - **Explicit Person Creation Helper (`CreatePersonModal`):** If a person is not present in the directory, an explicit modal sends `POST /api/people` to register them. The UI explicitly discloses that the Person record is an independent save and will not be automatically rolled back if asset registration is cancelled or fails.
+4. **Operational Notes & Metadata:**
+   - **`label` (Optional):** Descriptive tag for listings.
+   - **`comment` (Optional):** Internal audit remarks preserved in the initial audit log.
+   - **Routine Exclusion:** `legacyNewCostCenter` is strictly excluded from manual registration (belongs to future batch import workflows). Internal UUIDs, audit actors, verification records, eForms, and transfer fields are never exposed for manual client entry.
+
+### 5.2 API Submission & Safety Contracts
+- **Endpoint:** Authenticated `POST /api/assets` with `credentials: 'include'`.
+- **CSRF Guard:** Required `x-csrf-token` header retrieved from session context.
+- **Client Validation & Normalization:** `src/utils/assetFormValidation.ts` enforces required non-empty model and converts empty string inputs to `null`.
+- **Success Criteria:** The UI reports success **only** after receiving a real `HTTP 201 Created` response with the server-assigned UUID and persisted record. It displays a copyable UUID card and actions to register another asset or return to the dashboard.
+- **Error Handling & State Retention:**
+  - `400 Bad Request`: Field-specific or general validation error displayed without clearing typed input.
+  - `401 Unauthorized`: Notifies the user of session expiration without losing entered data.
+  - `403 Forbidden`: CSRF token error notice with re-fetch opportunity.
+  - `409 Conflict`: Identifies duplicate Asset Number or Serial Number collisions on the exact conflicting field.
+  - `5xx / Network Interruption`: Alerts the user that persistence is unverified if the connection dropped while in flight, advising checking the registry before re-submitting to prevent accidental duplicate entries.
+
+### 5.3 Granular Reference Catalog Loading (`src/utils/lookupClient.ts`)
+- **Truthful Error Reporting:** When lookup endpoints return HTTP 401 or 403, the system reports authentication or CSRF requirements specifically, rather than incorrectly claiming PostgreSQL is offline.
+- **Partial Failure Isolation:** If one or more of the 4 lookup requests fail (e.g. timeout on locations), successfully loaded catalogs are retained in memory while the user is shown a specific retry option (`Retry Catalogs`).
+- **Device Health Alignment:** Frontend contracts map `DeviceHealth.name` directly matching the Prisma data model.
+
+### 5.4 Operational Boundaries & Known Limitations
+- **Preview Inspection Mode Restriction:** In Preview Mode, the New Asset form can be visually audited and client validation can be exercised, but the primary Save action is strictly disabled (`disabled` state, visibly labeled "Save Disabled (Preview Mode)"). No fake records or simulated persistence are created.
+- **PostgreSQL Connection Prerequisite:** Real asset creation requires an active, provisioned PostgreSQL database and authenticated administrator session. In local/preview environments where PostgreSQL is not yet provisioned, live database integration tests are recorded as **NOT VERIFIED**. Comprehensive end-to-end integration QA across all workflows is scheduled for Phase P18.
+
+---
+
+## 6. Verification & Test Suite
+
+Run the full automated test suite (57 tests across 11 test suites):
 
 ```bash
 npm run test
 ```
 
 ### Automated Check Suites:
-1. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items, path bindings, and rejection of unapproved screenshot-only navigation items.
-2. `test/asset-validation.test.ts`: Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
-3. `test/asset-endpoints.test.ts`: Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
-4. `test/asset-audit-service.test.ts`: Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
-5. `test/auth-password.test.ts`: Argon2id hash formatting, candidate verification, username and password strength validation.
-6. `test/auth-bootstrap.test.ts`: Password strength enforcement, username validation, single-admin duplicate rejection.
-7. `test/auth-endpoints.test.ts`: Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
-8. `test/database-schema.test.ts`: All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
-9. `test/health.test.ts`: Backend diagnostic health check and server configuration defaults.
+1. `test/lookup-client.test.ts`: **(P06)** Verifies `DeviceHealth.name` mapping, complete success, partial catalog failure isolation, pre-existing state retention, and truthful 401/403 status distinction.
+2. `test/asset-form-validation.test.ts`: **(P06)** Verifies model requirement, optional UUID formatting, empty string to NULL normalization (no "N/A" synthesis), and distinct AC Owner vs Current User preservation.
+3. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items, path bindings, and rejection of unapproved screenshot-only navigation items.
+4. `test/asset-validation.test.ts`: **(P04)** Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
+5. `test/asset-endpoints.test.ts`: **(P04)** Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
+6. `test/asset-audit-service.test.ts`: **(P04)** Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
+7. `test/auth-password.test.ts`: **(P03)** Argon2id hash formatting, candidate verification, username and password strength validation.
+8. `test/auth-bootstrap.test.ts`: **(P03)** Password strength enforcement, username validation, single-admin duplicate rejection.
+9. `test/auth-endpoints.test.ts`: **(P03)** Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
+10. `test/database-schema.test.ts`: **(P02)** All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
+11. `test/health.test.ts`: **(P01)** Backend diagnostic health check and server configuration defaults.
 
 ---
 
-## 6. Scope Boundaries & Next Phase Handoff
+## 7. Scope Boundaries & Next Phase Handoff
 
-### Strictly Excluded in Phase P05
-- **No Business Logic on Navigation Pages:** No charts on Dashboard (P14), no asset table on All Assets (P08), no input form on New Asset (P06), no file upload on Import (P12), no audit engine on Needs Attention (P09), no backup utility on Settings (P15).
-- **No Unapproved Screenshot Tabs:** No "Employees" directory, "Reports" generator, or "User Management" multi-user RBAC.
-- **No Schema or Backend Changes:** Zero modifications to Prisma models, migrations, or Express API endpoints.
+### Strictly Excluded in Phase P06
+- **No Later-Phase Modules:** All Assets table/grid (P07 & P08), asset details/editing (P08), transfer workflows & eForms (P10), physical verification audits (P11), Excel batch importer (P12), needs attention discrepancy resolution (P13), executive metrics (P14), system settings & backup (P15).
+- **No Schema Changes or Migrations:** Zero modifications to Prisma models, migrations, or database tables.
+- **No Simulated Client Storage:** No fake persistence in `localStorage` or memory stubs pretending to be database saves.
 
-### Handoff to Phase P06 (New Asset UI)
-- Fully functioning `AppShell` with active route state binding.
-- Reusable UI component library (`Button`, `Input`, `Panel`, `StatusBadge`, `LoadingState`).
-- The `/assets/new` route placeholder ready to be swapped with the real Asset Creation form in Phase P06.
+### Handoff to Phase P07 (All Assets View)
+- Working `/assets/new` asset registration page with server-validated payload generation.
+- Reusable lookup client utility with granular error isolation and `DeviceHealth.name` contract alignment.
+- Six approved navigation items in `AppShell` ready to receive the All Assets grid in Phase P07.

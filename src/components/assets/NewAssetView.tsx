@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext.tsx';
 import type { NavigationRoute } from '../../types/navigation.ts';
 import type {
@@ -16,6 +16,12 @@ import {
   buildCreateAssetPayload,
   VALID_STATUSES,
 } from '../../utils/assetFormValidation.ts';
+import {
+  fetchCatalogs,
+  INITIAL_LOOKUP_STATE,
+  type LookupCatalogsState,
+  type LookupFailure,
+} from '../../utils/lookupClient.ts';
 import { Panel } from '../ui/Panel.tsx';
 import { Button } from '../ui/Button.tsx';
 import { Input } from '../ui/Input.tsx';
@@ -80,58 +86,31 @@ export const NewAssetView: React.FC<NewAssetViewProps> = ({ onNavigate }) => {
   const [people, setPeople] = useState<PersonLookup[]>([]);
   const [lookupsLoading, setLookupsLoading] = useState(true);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
+  const [lookupFailures, setLookupFailures] = useState<LookupFailure[]>([]);
+
+  // Keep a ref to current catalogs to preserve loaded options during partial re-fetches
+  const catalogsRef = useRef<LookupCatalogsState>(INITIAL_LOOKUP_STATE);
+  useEffect(() => {
+    catalogsRef.current = { assetTypes, locations, deviceHealth, people };
+  }, [assetTypes, locations, deviceHealth, people]);
 
   // Create Person Modal State
   const [isPersonModalOpen, setIsPersonModalOpen] = useState(false);
 
-  // Load Lookups from Backend APIs
+  // Load Lookups from Backend APIs with granular partial-failure handling
   const fetchLookups = useCallback(async () => {
     setLookupsLoading(true);
-    setLookupsError(null);
 
     try {
-      const [typesRes, locRes, healthRes, peopleRes] = await Promise.all([
-        fetch('/api/lookups/asset-types', { credentials: 'include' }).catch(() => null),
-        fetch('/api/lookups/locations', { credentials: 'include' }).catch(() => null),
-        fetch('/api/lookups/device-health', { credentials: 'include' }).catch(() => null),
-        fetch('/api/people?limit=100', { credentials: 'include' }).catch(() => null),
-      ]);
+      const result = await fetchCatalogs(catalogsRef.current);
 
-      let errorCount = 0;
+      setAssetTypes(result.data.assetTypes);
+      setLocations(result.data.locations);
+      setDeviceHealth(result.data.deviceHealth);
+      setPeople(result.data.people);
 
-      if (typesRes && typesRes.ok) {
-        const json = await typesRes.json();
-        setAssetTypes(json.data || []);
-      } else {
-        errorCount++;
-      }
-
-      if (locRes && locRes.ok) {
-        const json = await locRes.json();
-        setLocations(json.data || []);
-      } else {
-        errorCount++;
-      }
-
-      if (healthRes && healthRes.ok) {
-        const json = await healthRes.json();
-        setDeviceHealth(json.data || []);
-      } else {
-        errorCount++;
-      }
-
-      if (peopleRes && peopleRes.ok) {
-        const json = await peopleRes.json();
-        setPeople(json.data || []);
-      } else {
-        errorCount++;
-      }
-
-      if (errorCount === 4) {
-        setLookupsError(
-          'PostgreSQL backend is currently unreachable. Reference lookup catalogs cannot be populated.'
-        );
-      }
+      setLookupFailures(result.failures);
+      setLookupsError(result.summaryMessage);
     } catch {
       setLookupsError('Network connection error while fetching reference lookup options.');
     } finally {
@@ -467,12 +446,15 @@ export const NewAssetView: React.FC<NewAssetViewProps> = ({ onNavigate }) => {
         </div>
       )}
 
-      {/* Disconnected Database / Lookup Error Banner */}
+      {/* Lookup Catalog Error / Partial Failure Banner */}
       {lookupsError && (
         <div className="p-4 rounded-md bg-[#161a24] border border-[#263147] text-slate-300 text-xs flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>{lookupsError}</span>
+          <div className="flex items-start gap-2.5 max-w-2xl">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-semibold text-slate-200 block">Catalog Notification:</span>
+              <p className="leading-relaxed text-slate-300">{lookupsError}</p>
+            </div>
           </div>
           <Button
             variant="outline"
@@ -671,7 +653,7 @@ export const NewAssetView: React.FC<NewAssetViewProps> = ({ onNavigate }) => {
                 <option value="">-- Unassigned / Not Evaluated --</option>
                 {deviceHealth.map((health) => (
                   <option key={health.id} value={health.id}>
-                    {health.statusName}
+                    {health.name}
                   </option>
                 ))}
               </select>

@@ -18,7 +18,7 @@ export interface LocationLookup {
 
 export interface DeviceHealthLookup {
   id: string;
-  statusName: string;
+  name: string;
   description?: string | null;
   isActive: boolean;
 }
