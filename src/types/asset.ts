@@ -157,6 +157,7 @@ export interface AssetListItem {
   department: string | null;
   costCenter: string | null;
   label: string | null;
+  comment?: string | null;
   typeId: string | null;
   locationId: string | null;
   deviceHealthId: string | null;

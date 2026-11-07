@@ -1,5 +1,6 @@
 import type {
   AssetDetails,
+  AssetListItem,
   PatchAssetFormValues,
   AssetStatusEnum,
 } from '../types/asset.ts';
@@ -89,7 +90,7 @@ export function validatePatchForm(form: PatchAssetFormValues): {
  * - Detects no-op changes without emitting unnecessary network requests.
  */
 export function computePatchDelta(
-  original: AssetDetails,
+  original: AssetDetails | AssetListItem | Record<string, any>,
   form: PatchAssetFormValues
 ): {
   hasChanges: boolean;
