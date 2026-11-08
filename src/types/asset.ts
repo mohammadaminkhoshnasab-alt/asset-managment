@@ -107,6 +107,9 @@ export interface AssetDetails extends CreatedAssetRecord {
   deviceHealth?: DeviceHealthLookup | null;
   acOwner?: PersonLookup | null;
   currentUser?: PersonLookup | null;
+  lastVerifiedAt?: string | null;
+  lastVerifiedYearMonth?: string | null;
+  lastVerificationOutcome?: 'VERIFIED_MATCH' | 'LOCATION_MISMATCH' | 'USER_MISMATCH' | 'STATUS_MISMATCH' | 'NOT_FOUND' | 'DAMAGED' | null;
 }
 
 export interface PatchAssetFormValues {

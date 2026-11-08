@@ -1,4 +1,4 @@
-# IT Asset Management System — Phase P10 (Controlled Transfer & eForm Workflow)
+# IT Asset Management System — Phase P11 (Physical Verification & Date Precision)
 
 A production-oriented full-stack IT Asset Management Web Application, designed for independent local deployment on Ubuntu Linux (including WSL2 and private VMs) and developed in Google AI Studio.
 
@@ -6,7 +6,7 @@ A production-oriented full-stack IT Asset Management Web Application, designed f
 
 ## 1. Architecture Overview (Modular Monolith)
 
-This repository implements **Phase P10 — Controlled Transfer & eForm Workflow** on top of the Phase P01 foundation, Phase P02 PostgreSQL data architecture, Phase P03 single-administrator authentication, Phase P04 Core Asset APIs, Phase P05 Design System & Application Shell, Phase P06 New Asset Registration, Phase P07 Asset Details & Controlled Editing, Phase P08 Advanced Assets Data Grid, and Phase P09 Safe Inline Editing. It introduces a dedicated, auditable per-asset Transfer/eForm workflow, distinct from general asset editing. An administrator can create a PENDING transfer with origin snapshots, view transfer history, explicitly COMPLETE a transfer using a required non-unique eForm Number in a single PostgreSQL transaction with append-only audit evidence, or CANCEL a pending transfer without affecting current assignments. All other unfinished workspaces remain preserved as roadmap placeholders.
+This repository implements **Phase P11 — Physical Verification & Date Precision** on top of the Phase P01 foundation, Phase P02 PostgreSQL data architecture, Phase P03 single-administrator authentication, Phase P04 Core Asset APIs, Phase P05 Design System & Application Shell, Phase P06 New Asset Registration, Phase P07 Asset Details & Controlled Editing, Phase P08 Advanced Assets Data Grid, Phase P09 Safe Inline Editing, and Phase P10 Controlled Transfer & eForm Workflow. It introduces a dedicated, auditable per-asset Physical Verification workflow using the PostgreSQL/Prisma `PhysicalVerification` model. Administrators can record physical inspection results with explicit calendar date precision (DAY vs MONTH), review immutable verification history, and see an authoritative latest-verification summary on Asset Details without silently mutating asset lifecycle status, assignment, or location.
 
 ### Directory Structure
 
@@ -23,14 +23,16 @@ This repository implements **Phase P10 — Controlled Transfer & eForm Workflow*
 ├── README.md                 # Project, database, authentication & API documentation (this file)
 │
 ├── prisma/                   # PostgreSQL schema & versioned migrations (Prisma ORM)
-│   ├── schema.prisma         # Declarative PostgreSQL data model (including Assets, AssetTransfers and AssetAuditEvents)
+│   ├── schema.prisma         # Declarative PostgreSQL data model (including Assets, Transfers, Verifications, Audits)
 │   └── migrations/
 │       ├── 20261107000000_init_postgresql_schema/
-│       │   └── migration.sql # Initial data model with constraints & indexes
+│       │   └── migration.sql # Initial data model with constraints & indexes (including physical_verifications)
 │       ├── 20261107000001_add_session_storage/
 │       │   └── migration.sql # Additive PostgreSQL session storage table
-│       └── 20261107000002_add_transfer_dimensions/
-│           └── migration.sql # (P10) Additive transfer dimensions, relations & intent flags
+│       ├── 20261107000002_add_transfer_dimensions/
+│       │   └── migration.sql # (P10) Additive transfer dimensions, relations & intent flags
+│       └── 20261107000003_add_pending_transfer_partial_unique_index/
+│           └── migration.sql # (P10-Rework) Partial unique index on pending transfers
 │
 ├── server/                   # Backend application (Node.js + Express + TypeScript)
 │   ├── app.ts                # Express application factory, session, CSRF & routing middleware
@@ -52,18 +54,21 @@ This repository implements **Phase P10 — Controlled Transfer & eForm Workflow*
 │   │   ├── auth.ts           # Auth endpoints (/api/auth/login, /logout, /me, /csrf, /register)
 │   │   ├── health.ts         # Diagnostic GET /health endpoint
 │   │   ├── lookups.ts        # Reference lookup endpoints (/asset-types, /locations, /device-health, /people)
-│   │   └── transfers.ts      # (P10) Controlled Transfer & eForm endpoints (GET, POST pending, POST complete, POST cancel)
+│   │   ├── transfers.ts      # (P10) Controlled Transfer & eForm endpoints (GET, POST pending, POST complete, POST cancel)
+│   │   └── verifications.ts  # (P11) Physical Verification endpoints (GET history, POST record verification)
 │   ├── scripts/
 │   │   └── bootstrapAdmin.ts # Interactive CLI command for initial administrator provisioning
 │   ├── services/
 │   │   ├── assetService.ts   # Asset CRUD logic & atomic transactional audit event logging
 │   │   ├── lookupService.ts  # Read-only lookups and explicit Person creation service
-│   │   └── transferService.ts # (P10) Transactional transfer lifecycle, conflict checks & audit logging
+│   │   ├── transferService.ts # (P10) Transactional transfer lifecycle, conflict checks & audit logging
+│   │   └── verificationService.ts # (P11) Transactional verification recording, chronology comparator & summary cache
 │   ├── types/
 │   │   └── session.d.ts      # TypeScript augmentation for express-session and request context
 │   └── validators/
 │       ├── assetValidators.ts # Strict input validation for Asset Create and Patch operations
-│       └── transferValidators.ts # (P10) Strict validation for Transfer Create, Complete, and Cancel
+│       ├── transferValidators.ts # (P10) Strict validation for Transfer Create, Complete, and Cancel
+│       └── verificationValidators.ts # (P11) Calendar date validation, Gregorian leap years, allowlisted contract
 │
 ├── src/                      # Frontend application (React 19 + TypeScript + Tailwind v4)
 │   ├── App.tsx               # Session-aware root component (Auth provider, Login vs AppShell)
@@ -71,15 +76,17 @@ This repository implements **Phase P10 — Controlled Transfer & eForm Workflow*
 │   ├── main.tsx              # React DOM root bootstrapping
 │   ├── components/           # Component library & application shell
 │   │   ├── assets/           # Hardware asset management workspaces
-│   │   │   ├── AssetDetailsView.tsx    # (P07/P10) Real asset details, 9-field safe editor & transfer integration
-│   │   │   ├── AssetHistoryModal.tsx   # (P07/P10) Paginated audit ledger with TRANSFER diff & eForm support
-│   │   │   ├── AssetTransferHistory.tsx # (P10) Real-time pending transfer banner and completed/cancelled timeline
-│   │   │   ├── CancelTransferModal.tsx # (P10) Permanent transfer cancellation dialog with audit trail
-│   │   │   ├── CompleteTransferModal.tsx # (P10) Confirm & complete transfer with mandatory non-unique eForm
-│   │   │   ├── CreatePersonModal.tsx   # Minimal explicit Person creation helper
-│   │   │   ├── InitiateTransferModal.tsx # (P10) Create pending transfer modal with side-by-side dimensions
-│   │   │   ├── InlineEditRow.tsx       # (P09) Safe inline editor row for All Assets data grid
-│   │   │   └── NewAssetView.tsx        # Polished, responsive New Asset registration form
+│   │   │   ├── AssetDetailsView.tsx       # (P07/P10/P11) Real asset details, safe editor, transfers & verification
+│   │   │   ├── AssetHistoryModal.tsx      # (P07/P10/P11) Paginated audit ledger with verification diffs
+│   │   │   ├── AssetTransferHistory.tsx    # (P10) Transfer banner and completed/cancelled timeline
+│   │   │   ├── AssetVerificationHistory.tsx # (P11) Bounded, paginated verification inspection timeline
+│   │   │   ├── CancelTransferModal.tsx    # (P10) Permanent transfer cancellation dialog
+│   │   │   ├── CompleteTransferModal.tsx  # (P10) Confirm & complete transfer with mandatory non-unique eForm
+│   │   │   ├── CreatePersonModal.tsx      # Minimal explicit Person creation helper
+│   │   │   ├── InitiateTransferModal.tsx  # (P10) Create pending transfer modal
+│   │   │   ├── InlineEditRow.tsx          # (P09) Safe inline editor row for All Assets data grid
+│   │   │   ├── NewAssetView.tsx           # Polished New Asset registration form
+│   │   │   └── RecordVerificationModal.tsx # (P11) Physical verification modal with precision & context card
 │   │   ├── auth/
 │   │   │   └── LoginView.tsx # Industrial dark login card with real auth integration & preview toggle
 │   │   ├── shell/
@@ -99,13 +106,16 @@ This repository implements **Phase P10 — Controlled Transfer & eForm Workflow*
 │   │   ├── asset.ts          # Asset details, patch forms, audit events, lookup contracts
 │   │   ├── auth.ts           # AdminUser, AuthStatus, AuthContext contracts
 │   │   ├── navigation.ts     # Exactly 6 approved navigation routes & metadata
-│   │   └── transfer.ts       # (P10) Transfer status, payload, and record interfaces
+│   │   ├── transfer.ts       # (P10) Transfer status, payload, and record interfaces
+│   │   └── verification.ts   # (P11) Physical verification records, outcome enums, precision contracts
 │   └── utils/
 │       ├── assetFormValidation.ts # Form validation and NULL-normalization payload builder
 │       ├── assetPatchValidation.ts # 9-field allowlist, delta computation, no-op detection & UUID checks
+│       ├── assetRefreshClient.ts  # Authoritative post-mutation refresh client with unverified state handling
 │       └── lookupClient.ts        # Granular reference catalog loader and partial-failure handling
 │
 └── test/                     # Test suites (node:test + node:assert)
+    ├── physical-verification.test.ts # (P11) Verification validators, precision, chronology, security & immutability
     ├── transfer-workflow.test.ts # (P10) Transfer validators, non-unique eForm, security, and atomic transitions
     ├── asset-inline-editing.test.ts # (P09) Allowlist, delta computation, no-op suppression, UUID checks
     ├── asset-endpoints.test.ts # Route authentication & method prohibition tests (401, 405)
@@ -468,7 +478,37 @@ Phase P10 implements a dedicated, auditable per-asset Transfer & eForm workflow 
 
 ---
 
-## 10. Verification & Test Suite
+## 10. Physical Verification & Date Precision (Phase P11)
+
+Phase P11 implements an auditable per-asset Physical Verification workflow under `/api/assets/:assetId/verifications`, strictly separated from generic asset editing:
+
+### Dedicated Protected Endpoints:
+- `GET /api/assets/:assetId/verifications`: Retrieves bounded chronological physical verification records for an asset with validated `page` and `limit` query parameters (max 100), deterministic newest-first ordering (`createdAt DESC, id DESC`), and accurate pagination metadata.
+- `POST /api/assets/:assetId/verifications`: Records a physical inspection attempt in an atomic PostgreSQL transaction. Validates allowed fields, derives `verifiedBy` strictly from the authenticated server session, validates Gregorian calendar dates and leap years, updates the asset's latest verification summary cache if eligible, and atomically appends an immutable `PHYSICAL_VERIFICATION` audit event.
+
+### Key Invariants & Policies:
+1. **Calendar Precision (DAY vs MONTH):**
+   - **`DAY` Precision:** Exact inspection day is known. Requires `verifiedYear`, `verifiedMonth`, and `verifiedDay`. Strictly validates against the Gregorian calendar (including leap years like 2024-02-29 vs 2023-02-29, and 30-day months). Stored with `verifiedDay` integer and a timezone-safe UTC midnight `verifiedDate`.
+   - **`MONTH` Precision:** Exact day is unknown (e.g. historical audits). Requires `verifiedYear` and `verifiedMonth`. **Strictly forbids `verifiedDay`** in the payload; stores `verifiedDay = null` and `verifiedDate = null` in the database. Never guesses day 1, today's date, or creation timestamp.
+2. **`isSuccessful` Semantics (Completed Inspection):**
+   - `isSuccessful` represents whether the physical inspection attempt was successfully carried out to completion.
+   - **Critical:** Documenting a physical mismatch (`LOCATION_MISMATCH`, `USER_MISMATCH`, `STATUS_MISMATCH`) or defect (`DAMAGED`) is a completed, successful inspection (`isSuccessful: true`, the default).
+   - `isSuccessful: false` is reserved for inspection attempts that could not be completed (e.g. equipment locked in inaccessible room, site visit aborted).
+3. **Latest Verification Summary Policy & Deterministic Chronology:**
+   - Only completed inspections (`isSuccessful: true`) qualify to update the `Asset` latest verification summary (`lastVerifiedAt`, `lastVerifiedYearMonth`, `lastVerificationOutcome`).
+   - Unsuccessful attempts (`isSuccessful: false`) and backdated observations do NOT regress or overwrite a newer confirmed summary.
+   - When the latest confirmed observation is `MONTH` precision, `lastVerifiedAt` is explicitly set to `null` to avoid leaving a contradictory older day/timestamp next to a newer month-only summary.
+   - Chronology ordering comparator (`compareVerificationChronology`): Orders primarily by `verifiedYear` DESC, `verifiedMonth` DESC, `verifiedDay` DESC (when both DAY). If comparing DAY and MONTH within the exact same month, observation recording order (`createdAt` DESC, `id` DESC) serves as the deterministic tie-breaker without inventing a calendar day.
+4. **Append-Only Immutability & Audit Atomicity:**
+   - Physical verification records are append-only rows in `PhysicalVerification`.
+   - In one atomic Prisma transaction: the verification record is created, eligible summary cache updated, and an `AssetAuditEvent` with action `'PHYSICAL_VERIFICATION'` and full before/after snapshots is recorded.
+   - A recorded mismatch does NOT silently mutate asset assignment, location, or lifecycle status.
+5. **General PATCH Immutability:**
+   - The 9-field allowlist of `PATCH /api/assets/:id` continues to strictly reject `lastVerifiedAt`, `lastVerifiedYearMonth`, `lastVerificationOutcome`, and `verifications`.
+
+---
+
+## 11. Verification & Test Suite
 
 Run the full automated test suite:
 
@@ -476,39 +516,38 @@ Run the full automated test suite:
 npm run test
 ```
 
-### Automated Check Suites:
-1. `test/transfer-workflow.test.ts`: **(P10 & P10-REWORK)** Verifies transfer payload validation, rejection of forbidden asset/actor fields, single and multi-dimension support with nullable unassign, mandatory non-empty eForm on completion, non-unique eForm index invariant, additive partial unique index migration SQL, pagination query validation, truthful transferStatus cancellation audit, status-guarded concurrency updates, unauthenticated 401 protection, and UUID validation.
-2. `test/asset-inline-editing.test.ts`: **(P09)** Verifies 9-field general allowlist, strict rejection of reserved assignment/verification fields (P10/P11), `computePatchDelta` changed-field-only payloads, blank-to-null normalization, no-op write suppression, client-side validation rules, and backend UUID enforcement.
-3. `test/asset-grid-ui.test.ts`: **(P08)** Verifies Grid URL search/filter serialization, defensive deserialization, and column default visibility rules.
-4. `test/asset-list-endpoints.test.ts`: **(P08)** Verifies `GET /api/assets` requireAdmin authentication (401), query preservation, and read-only CSRF exemption.
-5. `test/asset-list-validation.test.ts`: **(P08)** Verifies pagination bounds (1–100), sort allowlists, direction validation, global search trimming (max 100), quick filter shortcuts, filter AST validation (depth <= 2, rules <= 20), and Prisma parameterized `where` and `orderBy` builders.
-6. `test/asset-details-editing.test.ts`: **(P07)** Verifies 9-field general patch allowlist, forbidden field rejection, client validation, no-op detection, NULL normalization, and `/assets/:uuid` route matching.
-7. `test/lookup-client.test.ts`: **(P06)** Verifies `DeviceHealth.name` mapping, complete success, partial catalog failure isolation, pre-existing state retention, and truthful 401/403 status distinction.
-8. `test/asset-form-validation.test.ts`: **(P06)** Verifies model requirement, optional UUID formatting, empty string to NULL normalization (no "N/A" synthesis), and distinct AC Owner vs Current User preservation.
-9. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items, path bindings, and rejection of unapproved screenshot-only navigation items.
-10. `test/asset-validation.test.ts`: **(P04)** Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
-11. `test/asset-endpoints.test.ts`: **(P04)** Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
-12. `test/asset-audit-service.test.ts`: **(P04)** Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
-13. `test/auth-password.test.ts`: **(P03)** Argon2id hash formatting, candidate verification, username and password strength validation.
-14. `test/auth-bootstrap.test.ts`: **(P03)** Password strength enforcement, username validation, single-admin duplicate rejection.
-15. `test/auth-endpoints.test.ts`: **(P03)** Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
-16. `test/database-schema.test.ts`: **(P02)** All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
-17. `test/health.test.ts`: **(P01)** Backend diagnostic health check and server configuration defaults.
+### Automated Check Suites (139 Tests Passing):
+1. `test/physical-verification.test.ts`: **(P11)** Verifies physical verification payload validation, rejection of forbidden asset/actor fields, all 6 `VerificationOutcome` enum values, `isSuccessful` semantics, calendar date validation with leap years and impossible dates, `MONTH` null-day invariant, `DAY` timezone-neutral dates, bounded pagination query validation (max 100), deterministic chronology comparator, schema and migration invariants, unauthenticated 401 protection, CSRF token enforcement (403), malformed UUID rejection (400), and general PATCH immutability.
+2. `test/transfer-workflow.test.ts`: **(P10 & P10-REWORK)** Verifies transfer payload validation, rejection of forbidden asset/actor fields, single and multi-dimension support with nullable unassign, mandatory non-empty eForm on completion, non-unique eForm index invariant, additive partial unique index migration SQL, pagination query validation, truthful transferStatus cancellation audit, status-guarded concurrency updates, unauthenticated 401 protection, and UUID validation.
+3. `test/asset-inline-editing.test.ts`: **(P09)** Verifies 9-field general allowlist, strict rejection of reserved assignment/verification fields (P10/P11), `computePatchDelta` changed-field-only payloads, blank-to-null normalization, no-op write suppression, client-side validation rules, and backend UUID enforcement.
+4. `test/asset-grid-ui.test.ts`: **(P08)** Verifies Grid URL search/filter serialization, defensive deserialization, and column default visibility rules.
+5. `test/asset-list-endpoints.test.ts`: **(P08)** Verifies `GET /api/assets` requireAdmin authentication (401), query preservation, and read-only CSRF exemption.
+6. `test/asset-list-validation.test.ts`: **(P08)** Verifies pagination bounds (1–100), sort allowlists, direction validation, global search trimming (max 100), quick filter shortcuts, filter AST validation (depth <= 2, rules <= 20), and Prisma parameterized `where` and `orderBy` builders.
+7. `test/asset-details-editing.test.ts`: **(P07)** Verifies 9-field general patch allowlist, forbidden field rejection, client validation, no-op detection, NULL normalization, and `/assets/:uuid` route matching.
+8. `test/lookup-client.test.ts`: **(P06)** Verifies `DeviceHealth.name` mapping, complete success, partial catalog failure isolation, pre-existing state retention, and truthful 401/403 status distinction.
+9. `test/asset-form-validation.test.ts`: **(P06)** Verifies model requirement, optional UUID formatting, empty string to NULL normalization (no "N/A" synthesis), and distinct AC Owner vs Current User preservation.
+10. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items, path bindings, and rejection of unapproved screenshot-only navigation items.
+11. `test/asset-validation.test.ts`: **(P04)** Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
+12. `test/asset-endpoints.test.ts`: **(P04)** Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
+13. `test/asset-audit-service.test.ts`: **(P04)** Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
+14. `test/auth-password.test.ts`: **(P03)** Argon2id hash formatting, candidate verification, username and password strength validation.
+15. `test/auth-bootstrap.test.ts`: **(P03)** Password strength enforcement, username validation, single-admin duplicate rejection.
+16. `test/auth-endpoints.test.ts`: **(P03)** Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
+17. `test/database-schema.test.ts`: **(P02)** All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
+18. `test/health.test.ts`: **(P01)** Backend diagnostic health check and server configuration defaults.
 
 ---
 
-## 11. Scope Boundaries & Next Phase Handoff
+## 12. Scope Boundaries & Next Phase Handoff
 
-### Strictly Excluded in Phase P10
-- **No Mass/Bulk Asset Transfers:** Multi-asset atomic batch operation endpoints remain excluded (eForm numbers can repeat across multiple independent asset transfers, but batch operations are not authorized).
-- **No Document Generation:** No PDF generator, document signatures, or approval chains.
-- **No Physical Verification Updates:** Physical inventory verification workflows belong to Phase P11.
-- **No Excel Import/Export:** Spreadsheet ingestion and export functionality belong to Phase P12.
+### Strictly Excluded in Phase P11
+- **No Bulk Verification Actions:** Verification is strictly per-asset on `/assets/:id`. No mass-verification endpoints or multi-select toolbar actions.
+- **No Excel Import/Export:** Ingestion and export of spreadsheets belong to Phase P12.
+- **No Automated Status Mutations:** Physical verification records mismatches without mutating asset status, location, or owner.
 - **No Seventh Navigation Item:** Navigation remains strictly bounded to exactly 6 items.
 
-### Handoff to Phase P11 (Physical Verification & Field Precision)
-- Working `AssetDetailsView` with integrated Controlled Transfer history timeline, Initiate Transfer modal, Complete Transfer modal (with eForm Number validation), and Cancel Transfer modal.
-- Transactional transfer service with atomic `AssetTransfer` status updates, `Asset` assignment updates, and `TRANSFER`/`TRANSFER_CANCELLED` audit events.
-- Read-only responsibility isolation preserved in general `PATCH /api/assets/:id` allowlist.
-- Ready for Phase P11: physical inventory verification workflows, outcome tracking, and day-vs-month date precision modeling.
+### Handoff to Phase P12 (Excel Import / Ingestion)
+- Working `AssetDetailsView` with integrated Physical Verification summary card (DAY vs MONTH precision), Record Physical Verification modal, and paginated verification timeline.
+- Atomic verification service with `PhysicalVerification` persistence, deterministic chronology comparator, summary cache update, and `PHYSICAL_VERIFICATION` audit event.
+- Ready for Phase P12: Excel spreadsheet file upload, column mapping, dry-run validation, and batch ingestion.
 

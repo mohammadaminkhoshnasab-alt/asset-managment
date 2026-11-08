@@ -8,7 +8,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<AdminUser | null>(null);
   const [csrfToken, setCsrfToken] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [previewMode, setPreviewMode] = useState<boolean>(false);
+  const [previewMode, setPreviewMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('preview') === '1' || params.get('autostart') === '1';
+    }
+    return false;
+  });
 
   // Fetch CSRF token for state-changing requests
   const fetchCsrfToken = useCallback(async (): Promise<string | null> => {

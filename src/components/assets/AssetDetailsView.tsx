@@ -35,6 +35,15 @@ import { InitiateTransferModal } from './InitiateTransferModal.tsx';
 import { CompleteTransferModal } from './CompleteTransferModal.tsx';
 import { CancelTransferModal } from './CancelTransferModal.tsx';
 import { AssetTransferHistory } from './AssetTransferHistory.tsx';
+import type {
+  PhysicalVerificationRecord,
+  CreateVerificationPayload,
+} from '../../types/verification.ts';
+import { RecordVerificationModal } from './RecordVerificationModal.tsx';
+import {
+  AssetVerificationHistory,
+  getOutcomeBadge,
+} from './AssetVerificationHistory.tsx';
 import {
   Cpu,
   Sliders,
@@ -108,6 +117,17 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
   const [isInitiateTransferOpen, setIsInitiateTransferOpen] = useState(false);
   const [completingTransfer, setCompletingTransfer] = useState<AssetTransferRecord | null>(null);
   const [cancellingTransfer, setCancellingTransfer] = useState<AssetTransferRecord | null>(null);
+
+  // Physical Verification States (Phase P11)
+  const [verifications, setVerifications] = useState<PhysicalVerificationRecord[]>([]);
+  const [verificationPagination, setVerificationPagination] = useState({
+    page: 1,
+    limit: 10,
+    total: 0,
+    totalPages: 1,
+  });
+  const [isVerificationsLoading, setIsVerificationsLoading] = useState(false);
+  const [isRecordVerificationOpen, setIsRecordVerificationOpen] = useState(false);
 
   // Load Reference Catalogs for Edit Mode & Transfers
   const loadCatalogs = useCallback(async () => {
@@ -191,6 +211,63 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
     }
   };
 
+  const loadVerificationsPage = useCallback(
+    async (page: number) => {
+      if (previewMode) return;
+      setIsVerificationsLoading(true);
+      try {
+        const res = await fetch(`/api/assets/${assetId}/verifications?page=${page}&limit=10`, {
+          credentials: 'include',
+        });
+        if (res.ok) {
+          const json = await res.json();
+          setVerifications(json.data || []);
+          if (json.pagination) {
+            setVerificationPagination(json.pagination);
+          }
+        }
+      } catch {
+        // network failure gracefully retained
+      } finally {
+        setIsVerificationsLoading(false);
+      }
+    },
+    [assetId, previewMode]
+  );
+
+  const handleVerificationSuccess = async (_created: PhysicalVerificationRecord) => {
+    // Confirmed POST on server -> execute authoritative GET refresh
+    const refreshResult = await fetchAssetData(false);
+    await loadVerificationsPage(1);
+
+    if (refreshResult.ok) {
+      setPostMutationFeedback({
+        mutationConfirmed: true,
+        mutationType: 'create',
+        refreshOk: true,
+        refreshNotVerified: false,
+        title: 'VERIFICATION RECORDED & STATE VERIFIED',
+        message:
+          'Authoritative physical verification attempt, latest verification summary, and audit events were successfully refreshed.',
+        isTransferStateUnverified: false,
+        canRetryRefresh: false,
+        partialFailure: false,
+      });
+    } else {
+      setPostMutationFeedback({
+        mutationConfirmed: true,
+        mutationType: 'create',
+        refreshOk: false,
+        refreshNotVerified: true,
+        title: 'Saved on server; refresh not verified',
+        message: `The physical verification record was committed on the server, but refreshing updated records could not be verified (${refreshResult.error || 'network error'}). Please retry again.`,
+        isTransferStateUnverified: false,
+        canRetryRefresh: true,
+        partialFailure: !!refreshResult.partialFailure,
+      });
+    }
+  };
+
   const handleTransferMutationSuccess = async (mutationType: MutationType = 'create') => {
     // 1. Issue strictly read-only GET refresh
     const refreshResult = await fetchAssetData(false);
@@ -257,8 +334,9 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
 
   useEffect(() => {
     fetchAssetData(true);
+    loadVerificationsPage(1);
     loadCatalogs();
-  }, [fetchAssetData, loadCatalogs]);
+  }, [fetchAssetData, loadVerificationsPage, loadCatalogs]);
 
   // Enter Edit Mode
   const handleStartEdit = () => {
@@ -1122,6 +1200,121 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
       </Panel>
 
       {/* ========================================================================= */}
+      {/* SECTION 03.6: PHYSICAL VERIFICATION & DATE PRECISION (PHASE P11) */}
+      {/* ========================================================================= */}
+      <Panel
+        systemTag="SECTION 03.6 // PHYSICAL VERIFICATION"
+        title="Physical Verification & Date Precision"
+        subtitle="Auditable per-asset physical inspection records with DAY/MONTH precision"
+        icon={<ShieldCheck className="w-4 h-4 text-[#ea8c34]" />}
+        headerAction={
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setIsRecordVerificationOpen(true)}
+            leftIcon={<ShieldCheck className="w-3.5 h-3.5" />}
+            disabled={previewMode}
+            title={previewMode ? 'Write actions are disabled in Preview Mode' : 'Record a new physical inspection attempt'}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white"
+          >
+            Record Physical Verification
+          </Button>
+        }
+      >
+        <div className="space-y-4">
+          {/* Authoritative Latest Verification Summary */}
+          <div className="p-4 rounded-md bg-[#0a0c10] border border-[#1b202a] space-y-3 font-mono text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#181d28] pb-2.5">
+              <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                Latest Confirmed Verification Summary
+              </span>
+              {asset.lastVerificationOutcome ? (
+                (() => {
+                  const badge = getOutcomeBadge(asset.lastVerificationOutcome);
+                  const BadgeIcon = badge.icon;
+                  return (
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider ${badge.className}`}
+                    >
+                      <BadgeIcon className="w-3 h-3" />
+                      {badge.label}
+                    </span>
+                  );
+                })()
+              ) : (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-800/80 border border-zinc-700 text-zinc-400 uppercase">
+                  Not Yet Verified
+                </span>
+              )}
+            </div>
+
+            {asset.lastVerificationOutcome || asset.lastVerifiedYearMonth ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                <div className="p-2.5 bg-[#0d1015] border border-[#1d2330] rounded">
+                  <span className="block text-[10px] text-slate-500 uppercase">Verified Date / Month</span>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="font-bold text-slate-100 text-sm">
+                      {asset.lastVerifiedAt
+                        ? new Date(asset.lastVerifiedAt).toISOString().split('T')[0]
+                        : asset.lastVerifiedYearMonth || '—'}
+                    </span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                        asset.lastVerifiedAt
+                          ? 'bg-blue-950/70 border border-blue-700/60 text-blue-300'
+                          : 'bg-purple-950/70 border border-purple-700/60 text-purple-300'
+                      }`}
+                    >
+                      {asset.lastVerifiedAt ? 'DAY Precision' : 'MONTH Precision (Day Unknown)'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-[#0d1015] border border-[#1d2330] rounded">
+                  <span className="block text-[10px] text-slate-500 uppercase">Inspection Status</span>
+                  <span className="text-emerald-400 font-semibold block mt-1 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Confirmed Inspection
+                  </span>
+                </div>
+
+                <div className="p-2.5 bg-[#0d1015] border border-[#1d2330] rounded">
+                  <span className="block text-[10px] text-slate-500 uppercase">Audit Baseline</span>
+                  <span className="text-slate-300 block mt-1 text-[11px] truncate">
+                    Derives authoritatively from completed inspections
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="py-2 text-slate-500 italic text-[11px]">
+                No physical verification records have been confirmed for this asset.
+              </div>
+            )}
+          </div>
+
+          {/* Physical Verification Timeline / History Table */}
+          <div className="space-y-2">
+            <div className="text-[11px] font-mono font-semibold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+              <span>Verification History & Inspection Log</span>
+              <span className="text-[10px] text-slate-500 font-normal">
+                {verificationPagination.total} total inspection attempt(s)
+              </span>
+            </div>
+            <AssetVerificationHistory
+              verifications={verifications}
+              total={verificationPagination.total}
+              page={verificationPagination.page}
+              limit={verificationPagination.limit}
+              totalPages={verificationPagination.totalPages}
+              isLoading={isVerificationsLoading}
+              onPageChange={loadVerificationsPage}
+            />
+          </div>
+        </div>
+      </Panel>
+
+      {/* ========================================================================= */}
       {/* SECTION 4: OPERATIONAL NOTES & LABELS */}
       {/* ========================================================================= */}
       <Panel
@@ -1312,6 +1505,21 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
           csrfToken={csrfToken}
           onCancelled={() => handleTransferMutationSuccess('cancel')}
           onCheckState={handleReadOnlyRefresh}
+        />
+      )}
+
+      {/* Physical Verification Modal (Phase P11) */}
+      {isRecordVerificationOpen && asset && (
+        <RecordVerificationModal
+          isOpen={isRecordVerificationOpen}
+          onClose={() => setIsRecordVerificationOpen(false)}
+          asset={asset}
+          csrfToken={csrfToken}
+          previewMode={previewMode}
+          onVerificationSuccess={handleVerificationSuccess}
+          onUncertainNetworkState={(_draft) => {
+            // Keep draft preserved in modal
+          }}
         />
       )}
     </div>

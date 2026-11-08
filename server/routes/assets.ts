@@ -13,11 +13,15 @@ import {
   AssetNotFoundError,
 } from '../services/assetService.ts';
 import { transferRouter } from './transfers.ts';
+import { verificationRouter } from './verifications.ts';
 
 export const assetRouter = Router();
 
 // Controlled Transfer & eForm Workflow endpoints (Phase P10)
 assetRouter.use('/:assetId/transfers', transferRouter);
+
+// Physical Verification & Date Precision endpoints (Phase P11)
+assetRouter.use('/:assetId/verifications', verificationRouter);
 
 /**
  * Helper to count total filter rules across nested groups.
