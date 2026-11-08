@@ -129,6 +129,7 @@ export interface AssetAuditEventRecord {
   source: string;
   action: string;
   operationId?: string | null;
+  eformNumber?: string | null;
   changedFields: string[];
   beforeValues?: Record<string, unknown> | null;
   afterValues?: Record<string, unknown> | null;

@@ -12,8 +12,12 @@ import {
   DuplicateIdentifierError,
   AssetNotFoundError,
 } from '../services/assetService.ts';
+import { transferRouter } from './transfers.ts';
 
 export const assetRouter = Router();
+
+// Controlled Transfer & eForm Workflow endpoints (Phase P10)
+assetRouter.use('/:assetId/transfers', transferRouter);
 
 /**
  * Helper to count total filter rules across nested groups.

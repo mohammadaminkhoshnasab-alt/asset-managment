@@ -1,4 +1,4 @@
-# IT Asset Management System — Phase P09 (Safe Inline Editing)
+# IT Asset Management System — Phase P10 (Controlled Transfer & eForm Workflow)
 
 A production-oriented full-stack IT Asset Management Web Application, designed for independent local deployment on Ubuntu Linux (including WSL2 and private VMs) and developed in Google AI Studio.
 
@@ -6,7 +6,7 @@ A production-oriented full-stack IT Asset Management Web Application, designed f
 
 ## 1. Architecture Overview (Modular Monolith)
 
-This repository implements **Phase P09 — Safe Inline Editing** on top of the Phase P01 foundation, Phase P02 PostgreSQL data architecture, Phase P03 single-administrator authentication, Phase P04 Core Asset APIs, Phase P05 Design System & Application Shell, Phase P06 New Asset Registration, Phase P07 Asset Details & Controlled Editing, and Phase P08 Advanced Assets Data Grid. It introduces safe, explicit, single-asset inline editing inside the existing All Assets Data Grid (`/assets`), strictly honoring the nine-field general allowlist via `PATCH /api/assets/:id` and transactional audit logging while keeping sensitive responsibility fields read-only and protecting unsaved work. All other unfinished workspaces remain preserved as roadmap placeholders.
+This repository implements **Phase P10 — Controlled Transfer & eForm Workflow** on top of the Phase P01 foundation, Phase P02 PostgreSQL data architecture, Phase P03 single-administrator authentication, Phase P04 Core Asset APIs, Phase P05 Design System & Application Shell, Phase P06 New Asset Registration, Phase P07 Asset Details & Controlled Editing, Phase P08 Advanced Assets Data Grid, and Phase P09 Safe Inline Editing. It introduces a dedicated, auditable per-asset Transfer/eForm workflow, distinct from general asset editing. An administrator can create a PENDING transfer with origin snapshots, view transfer history, explicitly COMPLETE a transfer using a required non-unique eForm Number in a single PostgreSQL transaction with append-only audit evidence, or CANCEL a pending transfer without affecting current assignments. All other unfinished workspaces remain preserved as roadmap placeholders.
 
 ### Directory Structure
 
@@ -23,12 +23,14 @@ This repository implements **Phase P09 — Safe Inline Editing** on top of the P
 ├── README.md                 # Project, database, authentication & API documentation (this file)
 │
 ├── prisma/                   # PostgreSQL schema & versioned migrations (Prisma ORM)
-│   ├── schema.prisma         # Declarative PostgreSQL data model (including Assets and AssetAuditEvents)
+│   ├── schema.prisma         # Declarative PostgreSQL data model (including Assets, AssetTransfers and AssetAuditEvents)
 │   └── migrations/
 │       ├── 20261107000000_init_postgresql_schema/
 │       │   └── migration.sql # Initial data model with constraints & indexes
-│       └── 20261107000001_add_session_storage/
-│           └── migration.sql # Additive PostgreSQL session storage table
+│       ├── 20261107000001_add_session_storage/
+│       │   └── migration.sql # Additive PostgreSQL session storage table
+│       └── 20261107000002_add_transfer_dimensions/
+│           └── migration.sql # (P10) Additive transfer dimensions, relations & intent flags
 │
 ├── server/                   # Backend application (Node.js + Express + TypeScript)
 │   ├── app.ts                # Express application factory, session, CSRF & routing middleware
@@ -49,27 +51,35 @@ This repository implements **Phase P09 — Safe Inline Editing** on top of the P
 │   │   ├── assets.ts         # Asset endpoints (POST, GET /:id, PATCH /:id, GET /:id/history)
 │   │   ├── auth.ts           # Auth endpoints (/api/auth/login, /logout, /me, /csrf, /register)
 │   │   ├── health.ts         # Diagnostic GET /health endpoint
-│   │   └── lookups.ts        # Reference lookup endpoints (/asset-types, /locations, /device-health, /people)
+│   │   ├── lookups.ts        # Reference lookup endpoints (/asset-types, /locations, /device-health, /people)
+│   │   └── transfers.ts      # (P10) Controlled Transfer & eForm endpoints (GET, POST pending, POST complete, POST cancel)
 │   ├── scripts/
 │   │   └── bootstrapAdmin.ts # Interactive CLI command for initial administrator provisioning
 │   ├── services/
 │   │   ├── assetService.ts   # Asset CRUD logic & atomic transactional audit event logging
-│   │   └── lookupService.ts  # Read-only lookups and explicit Person creation service
+│   │   ├── lookupService.ts  # Read-only lookups and explicit Person creation service
+│   │   └── transferService.ts # (P10) Transactional transfer lifecycle, conflict checks & audit logging
 │   ├── types/
 │   │   └── session.d.ts      # TypeScript augmentation for express-session and request context
 │   └── validators/
-│       └── assetValidators.ts # Strict input validation for Asset Create and Patch operations
+│       ├── assetValidators.ts # Strict input validation for Asset Create and Patch operations
+│       └── transferValidators.ts # (P10) Strict validation for Transfer Create, Complete, and Cancel
 │
 ├── src/                      # Frontend application (React 19 + TypeScript + Tailwind v4)
 │   ├── App.tsx               # Session-aware root component (Auth provider, Login vs AppShell)
 │   ├── index.css             # Tailwind v4 configuration, industrial color palette & custom scrollbars
 │   ├── main.tsx              # React DOM root bootstrapping
 │   ├── components/           # Component library & application shell
-│   │   ├── assets/           # (P06/P07) Hardware asset management workspaces
-│   │   │   ├── AssetDetailsView.tsx  # (P07) Real asset details, 9-field safe editor & responsibility locks
-│   │   │   ├── AssetHistoryModal.tsx # (P07) Paginated immutable audit ledger modal & diff viewer
-│   │   │   ├── CreatePersonModal.tsx # Minimal explicit Person creation helper
-│   │   │   └── NewAssetView.tsx      # Polished, responsive New Asset registration form
+│   │   ├── assets/           # Hardware asset management workspaces
+│   │   │   ├── AssetDetailsView.tsx    # (P07/P10) Real asset details, 9-field safe editor & transfer integration
+│   │   │   ├── AssetHistoryModal.tsx   # (P07/P10) Paginated audit ledger with TRANSFER diff & eForm support
+│   │   │   ├── AssetTransferHistory.tsx # (P10) Real-time pending transfer banner and completed/cancelled timeline
+│   │   │   ├── CancelTransferModal.tsx # (P10) Permanent transfer cancellation dialog with audit trail
+│   │   │   ├── CompleteTransferModal.tsx # (P10) Confirm & complete transfer with mandatory non-unique eForm
+│   │   │   ├── CreatePersonModal.tsx   # Minimal explicit Person creation helper
+│   │   │   ├── InitiateTransferModal.tsx # (P10) Create pending transfer modal with side-by-side dimensions
+│   │   │   ├── InlineEditRow.tsx       # (P09) Safe inline editor row for All Assets data grid
+│   │   │   └── NewAssetView.tsx        # Polished, responsive New Asset registration form
 │   │   ├── auth/
 │   │   │   └── LoginView.tsx # Industrial dark login card with real auth integration & preview toggle
 │   │   ├── shell/
@@ -86,17 +96,18 @@ This repository implements **Phase P09 — Safe Inline Editing** on top of the P
 │   ├── context/
 │   │   └── AuthContext.tsx   # React context for /api/auth/me, /login, /logout & preview inspection
 │   ├── types/
-│   │   ├── asset.ts          # (P06/P07) Asset details, patch forms, audit events, lookup contracts
+│   │   ├── asset.ts          # Asset details, patch forms, audit events, lookup contracts
 │   │   ├── auth.ts           # AdminUser, AuthStatus, AuthContext contracts
-│   │   └── navigation.ts     # Exactly 6 approved navigation routes & metadata
+│   │   ├── navigation.ts     # Exactly 6 approved navigation routes & metadata
+│   │   └── transfer.ts       # (P10) Transfer status, payload, and record interfaces
 │   └── utils/
-│       ├── assetFormValidation.ts # (P06) Form validation and NULL-normalization payload builder
-│       ├── assetPatchValidation.ts # (P07) 9-field allowlist, delta computation, no-op detection & UUID checks
-│       └── lookupClient.ts        # (P06) Granular reference catalog loader and partial-failure handling
+│       ├── assetFormValidation.ts # Form validation and NULL-normalization payload builder
+│       ├── assetPatchValidation.ts # 9-field allowlist, delta computation, no-op detection & UUID checks
+│       └── lookupClient.ts        # Granular reference catalog loader and partial-failure handling
 │
 └── test/                     # Test suites (node:test + node:assert)
-    ├── asset-audit-service.test.ts # Error mapping, conflict detail & transactional audit tests
-    ├── asset-details-editing.test.ts # (P07) Allowlist, validation, delta computation & route tests
+    ├── transfer-workflow.test.ts # (P10) Transfer validators, non-unique eForm, security, and atomic transitions
+    ├── asset-inline-editing.test.ts # (P09) Allowlist, delta computation, no-op suppression, UUID checks
     ├── asset-endpoints.test.ts # Route authentication & method prohibition tests (401, 405)
     ├── asset-form-validation.test.ts # (P06) Client form validation & payload building tests
     ├── asset-validation.test.ts # Asset input validation & forbidden field rejection tests
@@ -436,47 +447,66 @@ The inline editing row displays these fields in a clearly marked read-only panel
 
 ---
 
-## 9. Verification & Test Suite
+## 9. Controlled Transfer & eForm Workflow (Phase P10)
 
-Run the full automated test suite (85 tests across 16 test suites):
+Phase P10 implements a dedicated, auditable per-asset Transfer & eForm workflow under `/api/assets/:assetId/transfers`, strictly separated from generic asset editing:
+
+### Dedicated Protected Endpoints:
+- `GET /api/assets/:assetId/transfers`: Retrieves chronological transfer history for an asset, ordered newest-first, with resolved Person (fullName, personalCode, username) and Location relationships.
+- `POST /api/assets/:assetId/transfers`: Creates a `PENDING` transfer record snapshotting origin values. **The asset's active assignments remain strictly unchanged while pending.** Only one pending transfer may be active per asset at a time (conservative conflict rejection with 409).
+- `POST /api/assets/:assetId/transfers/:transferId/complete`: Confirms and executes transfer completion. Requires a non-empty, trimmed `eForm Number`. Atomically updates only explicitly requested asset assignment dimensions, marks transfer `COMPLETED`, and appends an immutable `TRANSFER` audit event in a single PostgreSQL transaction with full rollback on failure. Detects stale conflicts (409) if asset assignments changed between creation and completion.
+- `POST /api/assets/:assetId/transfers/:transferId/cancel`: Permanently cancels a pending transfer with optional remarks and logs a `TRANSFER_CANCELLED` audit event. **Asset assignments remain strictly unchanged.** Transfer history is immutably preserved.
+
+### Transfer Dimensions & Invariants:
+1. **Explicit Multi-Dimension Choice:** Administrators can change any combination of AC Owner, Current User, Department, Cost Center, and Location. Unselected dimensions remain completely unchanged.
+2. **Distinct Person Separation:** AC Owner (`acOwnerId`) and Current User (`currentUserId`) are separate references to `Person`. AC Owner tracks `personalCode` (custodial responsibility), while Current User tracks `username` (operator identity). They are never conflated into a single field.
+3. **Intentional Nullable Unassign:** Explicitly selecting "Unassign (None)" sets the destination to `null`, distinct from omitting the dimension (which preserves existing values).
+4. **Non-Unique eForm Number:** In accordance with real-world administrative batch transfers, eForm Numbers are indexed (`CREATE INDEX`) but NOT unique (`CREATE UNIQUE INDEX` is forbidden), legitimately grouping transfers involving multiple assets under the same document.
+5. **Additive Backward-Compatible Schema:** Additive columns (`from_current_user_id`, `to_current_user_id`, `from_cost_center`, `to_cost_center`, and `change_*` boolean flags) were introduced via versioned migration `20261107000002_add_transfer_dimensions/migration.sql` with zero table drops or destructive alterations.
+
+---
+
+## 10. Verification & Test Suite
+
+Run the full automated test suite (107 tests across 17 test suites):
 
 ```bash
 npm run test
 ```
 
 ### Automated Check Suites:
-1. `test/asset-inline-editing.test.ts`: **(P09)** Verifies 9-field general allowlist, strict rejection of reserved assignment/verification fields (P10/P11), `computePatchDelta` changed-field-only payloads, blank-to-null normalization, no-op write suppression, client-side validation rules, and backend UUID enforcement.
-2. `test/asset-grid-ui.test.ts`: **(P08)** Verifies Grid URL search/filter serialization, defensive deserialization, and column default visibility rules.
-3. `test/asset-list-endpoints.test.ts`: **(P08)** Verifies `GET /api/assets` requireAdmin authentication (401), query preservation, and read-only CSRF exemption.
-4. `test/asset-list-validation.test.ts`: **(P08)** Verifies pagination bounds (1–100), sort allowlists, direction validation, global search trimming (max 100), quick filter shortcuts, filter AST validation (depth <= 2, rules <= 20), and Prisma parameterized `where` and `orderBy` builders.
-5. `test/asset-details-editing.test.ts`: **(P07)** Verifies 9-field general patch allowlist, forbidden field rejection, client validation, no-op detection, NULL normalization, and `/assets/:uuid` route matching.
-6. `test/lookup-client.test.ts`: **(P06)** Verifies `DeviceHealth.name` mapping, complete success, partial catalog failure isolation, pre-existing state retention, and truthful 401/403 status distinction.
-7. `test/asset-form-validation.test.ts`: **(P06)** Verifies model requirement, optional UUID formatting, empty string to NULL normalization (no "N/A" synthesis), and distinct AC Owner vs Current User preservation.
-8. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items, path bindings, and rejection of unapproved screenshot-only navigation items.
-9. `test/asset-validation.test.ts`: **(P04)** Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
-10. `test/asset-endpoints.test.ts`: **(P04)** Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
-11. `test/asset-audit-service.test.ts`: **(P04)** Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
-12. `test/auth-password.test.ts`: **(P03)** Argon2id hash formatting, candidate verification, username and password strength validation.
-13. `test/auth-bootstrap.test.ts`: **(P03)** Password strength enforcement, username validation, single-admin duplicate rejection.
-14. `test/auth-endpoints.test.ts`: **(P03)** Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
-15. `test/database-schema.test.ts`: **(P02)** All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
-16. `test/health.test.ts`: **(P01)** Backend diagnostic health check and server configuration defaults.
+1. `test/transfer-workflow.test.ts`: **(P10)** Verifies transfer payload validation, rejection of forbidden asset/actor fields, single and multi-dimension support with nullable unassign, mandatory non-empty eForm on completion, non-unique eForm index invariant, additive schema and migration SQL integrity, unauthenticated 401 protection, and UUID validation.
+2. `test/asset-inline-editing.test.ts`: **(P09)** Verifies 9-field general allowlist, strict rejection of reserved assignment/verification fields (P10/P11), `computePatchDelta` changed-field-only payloads, blank-to-null normalization, no-op write suppression, client-side validation rules, and backend UUID enforcement.
+3. `test/asset-grid-ui.test.ts`: **(P08)** Verifies Grid URL search/filter serialization, defensive deserialization, and column default visibility rules.
+4. `test/asset-list-endpoints.test.ts`: **(P08)** Verifies `GET /api/assets` requireAdmin authentication (401), query preservation, and read-only CSRF exemption.
+5. `test/asset-list-validation.test.ts`: **(P08)** Verifies pagination bounds (1–100), sort allowlists, direction validation, global search trimming (max 100), quick filter shortcuts, filter AST validation (depth <= 2, rules <= 20), and Prisma parameterized `where` and `orderBy` builders.
+6. `test/asset-details-editing.test.ts`: **(P07)** Verifies 9-field general patch allowlist, forbidden field rejection, client validation, no-op detection, NULL normalization, and `/assets/:uuid` route matching.
+7. `test/lookup-client.test.ts`: **(P06)** Verifies `DeviceHealth.name` mapping, complete success, partial catalog failure isolation, pre-existing state retention, and truthful 401/403 status distinction.
+8. `test/asset-form-validation.test.ts`: **(P06)** Verifies model requirement, optional UUID formatting, empty string to NULL normalization (no "N/A" synthesis), and distinct AC Owner vs Current User preservation.
+9. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items, path bindings, and rejection of unapproved screenshot-only navigation items.
+10. `test/asset-validation.test.ts`: **(P04)** Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
+11. `test/asset-endpoints.test.ts`: **(P04)** Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
+12. `test/asset-audit-service.test.ts`: **(P04)** Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
+13. `test/auth-password.test.ts`: **(P03)** Argon2id hash formatting, candidate verification, username and password strength validation.
+14. `test/auth-bootstrap.test.ts`: **(P03)** Password strength enforcement, username validation, single-admin duplicate rejection.
+15. `test/auth-endpoints.test.ts`: **(P03)** Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
+16. `test/database-schema.test.ts`: **(P02)** All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
+17. `test/health.test.ts`: **(P01)** Backend diagnostic health check and server configuration defaults.
 
 ---
 
-## 10. Scope Boundaries & Next Phase Handoff
+## 11. Scope Boundaries & Next Phase Handoff
 
-### Strictly Excluded in Phase P09
-- **No Mass Actions or Bulk Editing:** Multi-row batch PATCH and mass mutations remain excluded.
-- **No Responsibility Transfers:** Reassignment of `acOwner`, `currentUser`, `department`, or `costCenter` is strictly deferred to Phase P10.
-- **No eForm Workflow:** Batch electronic transfer documentation belongs to Phase P10.
-- **No Physical Verification Creation:** Physical inventory verification workflows belong to Phase P11.
+### Strictly Excluded in Phase P10
+- **No Mass/Bulk Asset Transfers:** Multi-asset atomic batch operation endpoints remain excluded (eForm numbers can repeat across multiple independent asset transfers, but batch operations are not authorized).
+- **No Document Generation:** No PDF generator, document signatures, or approval chains.
+- **No Physical Verification Updates:** Physical inventory verification workflows belong to Phase P11.
 - **No Excel Import/Export:** Spreadsheet ingestion and export functionality belong to Phase P12.
-- **No Schema Changes or Migrations:** Zero modifications to Prisma models, migrations, or database tables.
-- **No Fabricated Demo Rows:** Preview mode explicitly preserves zero-data boundaries without mocking fake persistence.
+- **No Seventh Navigation Item:** Navigation remains strictly bounded to exactly 6 items.
 
-### Handoff to Phase P10 (Equipment Transfer & eForm Workflow)
-- Working `AllAssetsView` data grid with both view navigation (`/assets/:id`) and safe inline editing (`PATCH /api/assets/:id`).
-- Strict 9-field allowlist isolation preserving ownership, assignment, and organizational department fields for P10 transfer operations.
-- Stable transactional audit logging ready to record transfer events with batch eForm numbers.
+### Handoff to Phase P11 (Physical Verification & Field Precision)
+- Working `AssetDetailsView` with integrated Controlled Transfer history timeline, Initiate Transfer modal, Complete Transfer modal (with eForm Number validation), and Cancel Transfer modal.
+- Transactional transfer service with atomic `AssetTransfer` status updates, `Asset` assignment updates, and `TRANSFER`/`TRANSFER_CANCELLED` audit events.
+- Read-only responsibility isolation preserved in general `PATCH /api/assets/:id` allowlist.
+- Ready for Phase P11: physical inventory verification workflows, outcome tracking, and day-vs-month date precision modeling.
 

@@ -177,11 +177,20 @@ export const AssetHistoryModal: React.FC<AssetHistoryModalProps> = ({
                         className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
                           event.action === 'CREATE'
                             ? 'bg-emerald-950/60 border border-emerald-800/50 text-emerald-300'
+                            : event.action === 'TRANSFER'
+                            ? 'bg-purple-950/60 border border-purple-800/50 text-purple-300'
+                            : event.action === 'TRANSFER_CANCELLED'
+                            ? 'bg-rose-950/60 border border-rose-800/50 text-rose-300'
                             : 'bg-sky-950/60 border border-sky-800/50 text-sky-300'
                         }`}
                       >
                         {event.action}
                       </span>
+                      {event.eformNumber && (
+                        <span className="px-2 py-0.5 rounded text-[10px] bg-[#1c2433] border border-[#2d3a52] text-[#ea8c34] font-semibold">
+                          eForm: {event.eformNumber}
+                        </span>
+                      )}
                       <span className="text-slate-400 flex items-center gap-1">
                         <User className="w-3 h-3 text-[#ea8c34]" />
                         <span>{event.actor || 'admin'}</span>
@@ -210,7 +219,7 @@ export const AssetHistoryModal: React.FC<AssetHistoryModalProps> = ({
                     </div>
 
                     {/* Diff / Delta Table */}
-                    {event.action === 'UPDATE' && event.beforeValues && event.afterValues && (
+                    {(event.action === 'UPDATE' || event.action === 'TRANSFER') && event.beforeValues && event.afterValues && (
                       <div className="mt-2 overflow-x-auto">
                         <table className="w-full text-left text-[11px] font-mono border-collapse">
                           <thead>

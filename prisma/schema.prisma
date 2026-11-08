@@ -131,9 +131,13 @@ model Person {
   ownedAssets Asset[] @relation("AssetAcOwner")
   usedAssets  Asset[] @relation("AssetCurrentUser")
 
-  // Transfers to and from people
+  // Transfers to and from people (AC Owner)
   transfersFrom AssetTransfer[] @relation("TransferFromPerson")
   transfersTo   AssetTransfer[] @relation("TransferToPerson")
+
+  // Transfers to and from people (Current User - Phase P10)
+  transfersFromCurrentUser AssetTransfer[] @relation("TransferFromCurrentUser")
+  transfersToCurrentUser   AssetTransfer[] @relation("TransferToCurrentUser")
 
   @@index([fullName])
   @@index([department])
@@ -210,20 +214,41 @@ model AssetTransfer {
   assetId        String         @map("asset_id") @db.Uuid
   asset          Asset          @relation(fields: [assetId], references: [id], onDelete: Restrict)
 
+  // AC Owner transfer dimensions
   fromPersonId   String?        @map("from_person_id") @db.Uuid
   fromPerson     Person?        @relation("TransferFromPerson", fields: [fromPersonId], references: [id], onDelete: SetNull)
 
   toPersonId     String?        @map("to_person_id") @db.Uuid
   toPerson       Person?        @relation("TransferToPerson", fields: [toPersonId], references: [id], onDelete: SetNull)
 
+  // Current User transfer dimensions (P10 additive)
+  fromCurrentUserId String?     @map("from_current_user_id") @db.Uuid
+  fromCurrentUser   Person?     @relation("TransferFromCurrentUser", fields: [fromCurrentUserId], references: [id], onDelete: SetNull)
+
+  toCurrentUserId   String?     @map("to_current_user_id") @db.Uuid
+  toCurrentUser     Person?     @relation("TransferToCurrentUser", fields: [toCurrentUserId], references: [id], onDelete: SetNull)
+
+  // Department transfer dimensions
   fromDepartment String?        @map("from_department")
   toDepartment   String?        @map("to_department")
 
+  // Cost Center transfer dimensions (P10 additive)
+  fromCostCenter String?        @map("from_cost_center")
+  toCostCenter   String?        @map("to_cost_center")
+
+  // Location transfer dimensions
   fromLocationId String?        @map("from_location_id") @db.Uuid
   fromLocation   Location?      @relation("TransferFromLocation", fields: [fromLocationId], references: [id], onDelete: SetNull)
 
   toLocationId   String?        @map("to_location_id") @db.Uuid
   toLocation     Location?      @relation("TransferToLocation", fields: [toLocationId], references: [id], onDelete: SetNull)
+
+  // Explicit dimension change intent flags (P10 additive)
+  changeAcOwner     Boolean     @default(false) @map("change_ac_owner")
+  changeCurrentUser Boolean     @default(false) @map("change_current_user")
+  changeDepartment  Boolean     @default(false) @map("change_department")
+  changeCostCenter  Boolean     @default(false) @map("change_cost_center")
+  changeLocation    Boolean     @default(false) @map("change_location")
 
   // eForm Number is NON-UNIQUE and can repeat across multiple assets in a batch transfer
   eformNumber    String?        @map("eform_number")

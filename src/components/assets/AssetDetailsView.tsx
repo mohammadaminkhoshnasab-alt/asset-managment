@@ -6,6 +6,7 @@ import type {
   AssetAuditEventRecord,
   AssetStatusEnum,
 } from '../../types/asset.ts';
+import type { AssetTransferRecord } from '../../types/transfer.ts';
 import {
   ALLOWED_PATCH_FIELDS,
   validatePatchForm,
@@ -22,6 +23,10 @@ import { Input } from '../ui/Input.tsx';
 import { StatusBadge } from '../ui/StatusBadge.tsx';
 import { LoadingState } from '../ui/LoadingState.tsx';
 import { AssetHistoryModal } from './AssetHistoryModal.tsx';
+import { InitiateTransferModal } from './InitiateTransferModal.tsx';
+import { CompleteTransferModal } from './CompleteTransferModal.tsx';
+import { CancelTransferModal } from './CancelTransferModal.tsx';
+import { AssetTransferHistory } from './AssetTransferHistory.tsx';
 import {
   Cpu,
   Sliders,
@@ -41,6 +46,7 @@ import {
   Layers,
   Save,
   CheckCircle2,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 interface AssetDetailsViewProps {
@@ -79,7 +85,24 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [copiedUuid, setCopiedUuid] = useState(false);
 
-  // Fetch Authoritative Asset Details and Latest 5 History Events
+  // Transfer Workflow States (Phase P10)
+  const [transfers, setTransfers] = useState<AssetTransferRecord[]>([]);
+  const [isInitiateTransferOpen, setIsInitiateTransferOpen] = useState(false);
+  const [completingTransfer, setCompletingTransfer] = useState<AssetTransferRecord | null>(null);
+  const [cancellingTransfer, setCancellingTransfer] = useState<AssetTransferRecord | null>(null);
+
+  // Load Reference Catalogs for Edit Mode & Transfers
+  const loadCatalogs = useCallback(async () => {
+    try {
+      const result = await fetchCatalogs(catalogsRef.current);
+      setCatalogs(result.data);
+      catalogsRef.current = result.data;
+    } catch {
+      // Catalogs fallback gracefully
+    }
+  }, []);
+
+  // Fetch Authoritative Asset Details, Recent History, and Transfers
   const fetchAssetData = useCallback(async () => {
     if (previewMode) {
       setIsLoading(false);
@@ -90,9 +113,10 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
     setLoadError(null);
 
     try {
-      const [assetRes, historyRes] = await Promise.all([
+      const [assetRes, historyRes, transferRes] = await Promise.all([
         fetch(`/api/assets/${assetId}`, { credentials: 'include' }),
         fetch(`/api/assets/${assetId}/history?page=1&limit=5`, { credentials: 'include' }),
+        fetch(`/api/assets/${assetId}/transfers`, { credentials: 'include' }),
       ]);
 
       if (assetRes.ok) {
@@ -123,6 +147,11 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
           setHistoryTotal(historyJson.pagination.total);
         }
       }
+
+      if (transferRes.ok) {
+        const transferJson = await transferRes.json();
+        setTransfers(transferJson.data || []);
+      }
     } catch {
       setLoadError("Network connection error. Server or PostgreSQL database is unreachable.");
     } finally {
@@ -132,18 +161,8 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
 
   useEffect(() => {
     fetchAssetData();
-  }, [fetchAssetData]);
-
-  // Load Reference Catalogs for Edit Mode
-  const loadCatalogs = useCallback(async () => {
-    try {
-      const result = await fetchCatalogs(catalogsRef.current);
-      setCatalogs(result.data);
-      catalogsRef.current = result.data;
-    } catch {
-      // Catalogs fallback gracefully
-    }
-  }, []);
+    loadCatalogs();
+  }, [fetchAssetData, loadCatalogs]);
 
   // Enter Edit Mode
   const handleStartEdit = () => {
@@ -800,10 +819,20 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
         subtitle="AC Owner, Current User, department, and cost center"
         icon={<UserCheck className="w-4 h-4 text-[#ea8c34]" />}
         headerAction={
-          <span className="inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded bg-[#181d28] border border-[#262f40] text-slate-400 uppercase">
-            <Lock className="w-3 h-3 text-amber-400" />
-            <span>READ-ONLY // P10 WORKFLOW GATE</span>
-          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                loadCatalogs();
+                setIsInitiateTransferOpen(true);
+              }}
+              leftIcon={<ArrowRightLeft className="w-3.5 h-3.5" />}
+              disabled={previewMode || !!transfers.find((t) => t.status === 'PENDING')}
+            >
+              Initiate Transfer
+            </Button>
+          </div>
         }
       >
         <div className="space-y-4">
@@ -867,6 +896,37 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
             </p>
           </div>
         </div>
+      </Panel>
+
+      {/* ========================================================================= */}
+      {/* SECTION 3.5: CONTROLLED TRANSFER & eFORM WORKFLOW (PHASE P10) */}
+      {/* ========================================================================= */}
+      <Panel
+        systemTag="SECTION 03.5 // TRANSFERS & eFORM"
+        title="Controlled Transfer & eForm History"
+        subtitle="Auditable per-asset custodial and organizational transfer history"
+        icon={<ArrowRightLeft className="w-4 h-4 text-[#ea8c34]" />}
+        headerAction={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              loadCatalogs();
+              setIsInitiateTransferOpen(true);
+            }}
+            leftIcon={<ArrowRightLeft className="w-3.5 h-3.5" />}
+            disabled={previewMode || !!transfers.find((t) => t.status === 'PENDING')}
+          >
+            Initiate Transfer
+          </Button>
+        }
+      >
+        <AssetTransferHistory
+          transfers={transfers}
+          onInitiateComplete={(t) => setCompletingTransfer(t)}
+          onInitiateCancel={(t) => setCancellingTransfer(t)}
+          previewMode={previewMode}
+        />
       </Panel>
 
       {/* ========================================================================= */}
@@ -967,11 +1027,20 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
                       className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
                         event.action === 'CREATE'
                           ? 'bg-emerald-950/60 border border-emerald-800/50 text-emerald-300'
+                          : event.action === 'TRANSFER'
+                          ? 'bg-purple-950/60 border border-purple-800/50 text-purple-300'
+                          : event.action === 'TRANSFER_CANCELLED'
+                          ? 'bg-rose-950/60 border border-rose-800/50 text-rose-300'
                           : 'bg-sky-950/60 border border-sky-800/50 text-sky-300'
                       }`}
                     >
                       {event.action}
                     </span>
+                    {event.eformNumber && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#181d28] border border-[#283244] text-[#ea8c34] font-semibold">
+                        eForm: {event.eformNumber}
+                      </span>
+                    )}
                     <span className="text-slate-300">@{event.actor || 'admin'}</span>
                   </div>
                   <span className="text-slate-500">{formatTimestamp(event.timestamp)}</span>
@@ -1015,6 +1084,41 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
         assetId={asset.id}
         assetModel={asset.model}
       />
+
+      {/* Controlled Transfer & eForm Workflow Modals (Phase P10) */}
+      {isInitiateTransferOpen && (
+        <InitiateTransferModal
+          isOpen={isInitiateTransferOpen}
+          onClose={() => setIsInitiateTransferOpen(false)}
+          asset={asset}
+          catalogs={catalogs}
+          csrfToken={csrfToken}
+          previewMode={previewMode}
+          onTransferCreated={fetchAssetData}
+        />
+      )}
+
+      {completingTransfer && (
+        <CompleteTransferModal
+          isOpen={!!completingTransfer}
+          onClose={() => setCompletingTransfer(null)}
+          transfer={completingTransfer}
+          assetModel={asset.model}
+          csrfToken={csrfToken}
+          onCompleted={fetchAssetData}
+        />
+      )}
+
+      {cancellingTransfer && (
+        <CancelTransferModal
+          isOpen={!!cancellingTransfer}
+          onClose={() => setCancellingTransfer(null)}
+          transfer={cancellingTransfer}
+          assetModel={asset.model}
+          csrfToken={csrfToken}
+          onCancelled={fetchAssetData}
+        />
+      )}
     </div>
   );
 };
