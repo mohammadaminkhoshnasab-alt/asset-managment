@@ -87,6 +87,14 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
 
   // Transfer Workflow States (Phase P10)
   const [transfers, setTransfers] = useState<AssetTransferRecord[]>([]);
+  const [activePendingTransfer, setActivePendingTransfer] = useState<AssetTransferRecord | null>(null);
+  const [transferPagination, setTransferPagination] = useState({
+    page: 1,
+    limit: 10,
+    total: 0,
+    totalPages: 1,
+  });
+  const [postMutationRefreshWarning, setPostMutationRefreshWarning] = useState<string | null>(null);
   const [isInitiateTransferOpen, setIsInitiateTransferOpen] = useState(false);
   const [completingTransfer, setCompletingTransfer] = useState<AssetTransferRecord | null>(null);
   const [cancellingTransfer, setCancellingTransfer] = useState<AssetTransferRecord | null>(null);
@@ -116,7 +124,7 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
       const [assetRes, historyRes, transferRes] = await Promise.all([
         fetch(`/api/assets/${assetId}`, { credentials: 'include' }),
         fetch(`/api/assets/${assetId}/history?page=1&limit=5`, { credentials: 'include' }),
-        fetch(`/api/assets/${assetId}/transfers`, { credentials: 'include' }),
+        fetch(`/api/assets/${assetId}/transfers?page=1&limit=10`, { credentials: 'include' }),
       ]);
 
       if (assetRes.ok) {
@@ -151,6 +159,16 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
       if (transferRes.ok) {
         const transferJson = await transferRes.json();
         setTransfers(transferJson.data || []);
+        if (transferJson.activePending !== undefined) {
+          setActivePendingTransfer(transferJson.activePending);
+        } else {
+          setActivePendingTransfer(
+            (transferJson.data || []).find((t: any) => t.status === 'PENDING') || null
+          );
+        }
+        if (transferJson.pagination) {
+          setTransferPagination(transferJson.pagination);
+        }
       }
     } catch {
       setLoadError("Network connection error. Server or PostgreSQL database is unreachable.");
@@ -158,6 +176,37 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
       setIsLoading(false);
     }
   }, [assetId, previewMode]);
+
+  const loadTransfersPage = async (page: number) => {
+    try {
+      const res = await fetch(`/api/assets/${assetId}/transfers?page=${page}&limit=10`, {
+        credentials: 'include',
+      });
+      if (res.ok) {
+        const json = await res.json();
+        setTransfers(json.data || []);
+        if (json.pagination) {
+          setTransferPagination(json.pagination);
+        }
+        if (json.activePending !== undefined) {
+          setActivePendingTransfer(json.activePending);
+        }
+      }
+    } catch {
+      // transient network failure gracefully retained
+    }
+  };
+
+  const handleTransferMutationSuccess = async () => {
+    setPostMutationRefreshWarning(null);
+    try {
+      await fetchAssetData();
+    } catch {
+      setPostMutationRefreshWarning(
+        'The transfer mutation was submitted successfully on the server, but reloading the updated asset state encountered a network error. Your changes were safely recorded.'
+      );
+    }
+  };
 
   useEffect(() => {
     fetchAssetData();
@@ -572,6 +621,26 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
         </div>
       )}
 
+      {postMutationRefreshWarning && (
+        <div className="p-3.5 rounded bg-amber-950/60 border border-amber-700/70 text-amber-200 text-xs font-mono flex items-start justify-between gap-3 animate-fadeIn">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <strong className="block font-semibold">Post-Mutation Refresh Notice:</strong>
+              <span>{postMutationRefreshWarning}</span>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchAssetData}
+            leftIcon={<RotateCcw className="w-3.5 h-3.5 text-amber-400" />}
+          >
+            Reload State
+          </Button>
+        </div>
+      )}
+
       {/* ========================================================================= */}
       {/* SECTION 1: HARDWARE IDENTIFICATION */}
       {/* ========================================================================= */}
@@ -828,7 +897,11 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
                 setIsInitiateTransferOpen(true);
               }}
               leftIcon={<ArrowRightLeft className="w-3.5 h-3.5" />}
-              disabled={previewMode || !!transfers.find((t) => t.status === 'PENDING')}
+              disabled={
+                previewMode ||
+                !!activePendingTransfer ||
+                !!transfers.find((t) => t.status === 'PENDING')
+              }
             >
               Initiate Transfer
             </Button>
@@ -915,7 +988,11 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
               setIsInitiateTransferOpen(true);
             }}
             leftIcon={<ArrowRightLeft className="w-3.5 h-3.5" />}
-            disabled={previewMode || !!transfers.find((t) => t.status === 'PENDING')}
+            disabled={
+              previewMode ||
+              !!activePendingTransfer ||
+              !!transfers.find((t) => t.status === 'PENDING')
+            }
           >
             Initiate Transfer
           </Button>
@@ -923,6 +1000,9 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
       >
         <AssetTransferHistory
           transfers={transfers}
+          activePendingTransfer={activePendingTransfer}
+          pagination={transferPagination}
+          onPageChange={loadTransfersPage}
           onInitiateComplete={(t) => setCompletingTransfer(t)}
           onInitiateCancel={(t) => setCancellingTransfer(t)}
           previewMode={previewMode}
@@ -1049,7 +1129,7 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
                 <div className="flex flex-wrap items-center gap-2 text-slate-400">
                   <span className="text-slate-500">Changed:</span>
                   <span className="text-slate-200">
-                    {event.changedFields?.join(', ') || 'Initial specification'}
+                    {event.changedFields?.map((f: string) => f === 'transferStatus' ? 'transferStatus (Workflow)' : f).join(', ') || 'Initial specification'}
                   </span>
                 </div>
               </div>
@@ -1094,7 +1174,7 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
           catalogs={catalogs}
           csrfToken={csrfToken}
           previewMode={previewMode}
-          onTransferCreated={fetchAssetData}
+          onTransferCreated={handleTransferMutationSuccess}
         />
       )}
 
@@ -1105,7 +1185,7 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
           transfer={completingTransfer}
           assetModel={asset.model}
           csrfToken={csrfToken}
-          onCompleted={fetchAssetData}
+          onCompleted={handleTransferMutationSuccess}
         />
       )}
 
@@ -1116,7 +1196,7 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
           transfer={cancellingTransfer}
           assetModel={asset.model}
           csrfToken={csrfToken}
-          onCancelled={fetchAssetData}
+          onCancelled={handleTransferMutationSuccess}
         />
       )}
     </div>

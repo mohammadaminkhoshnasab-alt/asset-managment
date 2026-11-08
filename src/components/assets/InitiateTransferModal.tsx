@@ -15,6 +15,7 @@ import {
   AlertCircle,
   FileCheck2,
   Lock,
+  RefreshCw,
 } from 'lucide-react';
 
 interface InitiateTransferModalProps {
@@ -59,12 +60,14 @@ export const InitiateTransferModal: React.FC<InitiateTransferModalProps> = ({
   // UI status
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isUncertainError, setIsUncertainError] = useState(false);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setIsUncertainError(false);
 
     if (previewMode) {
       setErrorMessage('Transfer creation is disabled in Preview Inspection Mode. Sign in with administrative credentials.');
@@ -135,7 +138,11 @@ export const InitiateTransferModal: React.FC<InitiateTransferModalProps> = ({
         setErrorMessage(data.error || `Failed to initiate transfer (Status: ${res.status}).`);
       }
     } catch {
-      setErrorMessage('Network connection failure. Server or database is currently unreachable.');
+      // Honest uncertain-network feedback: Persistence may have occurred. Never auto-retry. Keep form state intact.
+      setIsUncertainError(true);
+      setErrorMessage(
+        'Network or communication error: Verification could not be confirmed. The transfer initiation may have already succeeded and persisted on the server. Please reload the transfer state to verify before attempting to submit again, and do NOT resubmit without checking.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -180,11 +187,39 @@ export const InitiateTransferModal: React.FC<InitiateTransferModalProps> = ({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-5">
           {errorMessage && (
-            <div className="p-3.5 rounded bg-rose-950/50 border border-rose-800/60 text-rose-300 text-xs font-mono flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <div>
-                <strong className="block font-semibold">Action Blocked:</strong>
-                <span>{errorMessage}</span>
+            <div
+              className={`p-3.5 rounded text-xs font-mono flex items-start gap-2.5 ${
+                isUncertainError
+                  ? 'bg-amber-950/60 border border-amber-700/70 text-amber-200'
+                  : 'bg-rose-950/50 border border-rose-800/60 text-rose-300'
+              }`}
+            >
+              <AlertCircle
+                className={`w-4 h-4 shrink-0 mt-0.5 ${
+                  isUncertainError ? 'text-amber-400' : 'text-rose-400'
+                }`}
+              />
+              <div className="space-y-2 flex-1">
+                <div>
+                  <strong className="block font-semibold">
+                    {isUncertainError ? 'Action Unverified (Persistence Possible):' : 'Action Blocked:'}
+                  </strong>
+                  <span>{errorMessage}</span>
+                </div>
+                {isUncertainError && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onTransferCreated();
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold bg-[#181d28] border border-amber-600/60 text-amber-300 hover:text-white hover:bg-[#202736] cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3 text-amber-400" />
+                      Reload Transfer State
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}

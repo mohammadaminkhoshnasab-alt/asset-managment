@@ -213,13 +213,13 @@ export const AssetHistoryModal: React.FC<AssetHistoryModalProps> = ({
                       <span>
                         MODIFIED FIELDS ({event.changedFields?.length || 0}):{' '}
                         <strong className="text-slate-200">
-                          {event.changedFields?.join(', ') || 'None'}
+                          {event.changedFields?.map((f) => (f === 'transferStatus' ? 'transferStatus (Workflow)' : f)).join(', ') || 'None'}
                         </strong>
                       </span>
                     </div>
 
                     {/* Diff / Delta Table */}
-                    {(event.action === 'UPDATE' || event.action === 'TRANSFER') && event.beforeValues && event.afterValues && (
+                    {(event.action === 'UPDATE' || event.action === 'TRANSFER' || event.action === 'TRANSFER_CANCELLED') && event.beforeValues && event.afterValues && (
                       <div className="mt-2 overflow-x-auto">
                         <table className="w-full text-left text-[11px] font-mono border-collapse">
                           <thead>
@@ -233,7 +233,7 @@ export const AssetHistoryModal: React.FC<AssetHistoryModalProps> = ({
                             {event.changedFields?.map((field) => (
                               <tr key={field} className="border-b border-[#151a24]/50">
                                 <td className="py-1 px-2 text-slate-300 font-semibold">
-                                  {field}
+                                  {field === 'transferStatus' ? 'transferStatus (Workflow)' : field}
                                 </td>
                                 <td className="py-1 px-2 text-rose-300/80 break-all">
                                   {renderValue(event.beforeValues?.[field])}

@@ -14,10 +14,20 @@ import {
   ArrowRight,
   ShieldCheck,
   Ban,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 interface AssetTransferHistoryProps {
   transfers: AssetTransferRecord[];
+  activePendingTransfer?: AssetTransferRecord | null;
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  onPageChange?: (page: number) => void;
   onInitiateComplete: (transfer: AssetTransferRecord) => void;
   onInitiateCancel: (transfer: AssetTransferRecord) => void;
   previewMode: boolean;
@@ -25,11 +35,16 @@ interface AssetTransferHistoryProps {
 
 export const AssetTransferHistory: React.FC<AssetTransferHistoryProps> = ({
   transfers,
+  activePendingTransfer,
+  pagination,
+  onPageChange,
   onInitiateComplete,
   onInitiateCancel,
   previewMode,
 }) => {
-  const activePending = transfers.find((t) => t.status === 'PENDING');
+  const activePending = activePendingTransfer !== undefined
+    ? activePendingTransfer
+    : transfers.find((t) => t.status === 'PENDING');
   const pastTransfers = transfers.filter((t) => t.status !== 'PENDING');
 
   const formatDateTime = (iso?: string | null) => {
@@ -280,6 +295,36 @@ export const AssetTransferHistory: React.FC<AssetTransferHistoryProps> = ({
               )}
             </div>
           ))
+        )}
+
+        {/* Bounded Transfer History Pagination Controls */}
+        {pagination && pagination.totalPages > 1 && onPageChange && (
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 px-1 text-slate-400 text-xs border-t border-[#181d28]">
+            <div className="text-[11px] text-slate-500">
+              Showing page <strong className="text-slate-300">{pagination.page}</strong> of{' '}
+              <strong className="text-slate-300">{pagination.totalPages}</strong> ({pagination.total} total transfers)
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onPageChange(pagination.page - 1)}
+                disabled={pagination.page <= 1}
+                leftIcon={<ChevronLeft className="w-3.5 h-3.5" />}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onPageChange(pagination.page + 1)}
+                disabled={pagination.page >= pagination.totalPages}
+                rightIcon={<ChevronRight className="w-3.5 h-3.5" />}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
         )}
       </div>
     </div>

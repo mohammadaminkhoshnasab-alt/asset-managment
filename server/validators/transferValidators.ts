@@ -30,6 +30,53 @@ export interface CancelTransferValidatedData {
   notes?: string | null;
 }
 
+export interface TransferPaginationQuery {
+  page: number;
+  limit: number;
+}
+
+/**
+ * Validates query parameters for bounded transfer history (GET /api/assets/:assetId/transfers).
+ * Enforces page >= 1 and 1 <= limit <= 100.
+ */
+export function validateTransferPaginationQuery(
+  query: Record<string, unknown>
+): ValidationResult<TransferPaginationQuery> {
+  let page = 1;
+  let limit = 20;
+
+  if (query.page !== undefined && query.page !== null && query.page !== '') {
+    const parsedPage = Number(query.page);
+    if (!Number.isInteger(parsedPage) || parsedPage < 1) {
+      return {
+        valid: false,
+        error: "Query parameter 'page' must be a positive integer greater than or equal to 1.",
+        field: 'page',
+        code: 'INVALID_FORMAT',
+      };
+    }
+    page = parsedPage;
+  }
+
+  if (query.limit !== undefined && query.limit !== null && query.limit !== '') {
+    const parsedLimit = Number(query.limit);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
+      return {
+        valid: false,
+        error: "Query parameter 'limit' must be an integer between 1 and 100.",
+        field: 'limit',
+        code: 'INVALID_FORMAT',
+      };
+    }
+    limit = parsedLimit;
+  }
+
+  return {
+    valid: true,
+    data: { page, limit },
+  };
+}
+
 const FORBIDDEN_TRANSFER_FIELDS: Record<string, string> = {
   id: "Transfer 'id' is server-generated and immutable.",
   assetId: "Asset ID must be specified via URL route parameter, not request body.",

@@ -447,35 +447,37 @@ The inline editing row displays these fields in a clearly marked read-only panel
 
 ---
 
-## 9. Controlled Transfer & eForm Workflow (Phase P10)
+## 9. Controlled Transfer & eForm Workflow (Phase P10 & P10-REWORK)
 
 Phase P10 implements a dedicated, auditable per-asset Transfer & eForm workflow under `/api/assets/:assetId/transfers`, strictly separated from generic asset editing:
 
 ### Dedicated Protected Endpoints:
-- `GET /api/assets/:assetId/transfers`: Retrieves chronological transfer history for an asset, ordered newest-first, with resolved Person (fullName, personalCode, username) and Location relationships.
-- `POST /api/assets/:assetId/transfers`: Creates a `PENDING` transfer record snapshotting origin values. **The asset's active assignments remain strictly unchanged while pending.** Only one pending transfer may be active per asset at a time (conservative conflict rejection with 409).
-- `POST /api/assets/:assetId/transfers/:transferId/complete`: Confirms and executes transfer completion. Requires a non-empty, trimmed `eForm Number`. Atomically updates only explicitly requested asset assignment dimensions, marks transfer `COMPLETED`, and appends an immutable `TRANSFER` audit event in a single PostgreSQL transaction with full rollback on failure. Detects stale conflicts (409) if asset assignments changed between creation and completion.
-- `POST /api/assets/:assetId/transfers/:transferId/cancel`: Permanently cancels a pending transfer with optional remarks and logs a `TRANSFER_CANCELLED` audit event. **Asset assignments remain strictly unchanged.** Transfer history is immutably preserved.
+- `GET /api/assets/:assetId/transfers`: Retrieves bounded chronological transfer history for an asset with validated `page` and `limit` query parameters (max 100), deterministic newest-first ordering with ID tie-breaker, accurate pagination metadata, and authoritative `activePending` record discovery (accessible regardless of active history page).
+- `POST /api/assets/:assetId/transfers`: Creates a `PENDING` transfer record snapshotting origin values. **The asset's active assignments remain strictly unchanged while pending.** Concurrency-safe: backed by an additive PostgreSQL partial unique index on `asset_id` WHERE `status = 'PENDING'` (`20261107000003_add_pending_transfer_partial_unique_index/migration.sql`), with rejected races mapped to HTTP 409.
+- `POST /api/assets/:assetId/transfers/:transferId/complete`: Confirms and executes transfer completion. Requires a non-empty, trimmed `eForm Number`. Atomically executes status-guarded `updateMany` (exactly-once completion) and concurrency-safe compare-and-set conditional update on changed `Asset` dimensions, marking transfer `COMPLETED` and appending an immutable `TRANSFER` audit event in a single PostgreSQL transaction with full rollback on conflict (409) or failure.
+- `POST /api/assets/:assetId/transfers/:transferId/cancel`: Atomically cancels a pending transfer via status-guarded `updateMany` (exactly-once). **Asset assignments remain strictly unchanged.** Appends an immutable, truthful `TRANSFER_CANCELLED` audit event scoped strictly to `transferStatus` (never `Asset.status`), preserving full lifecycle integrity.
 
-### Transfer Dimensions & Invariants:
+### Transfer Dimensions & Concurrency Invariants:
 1. **Explicit Multi-Dimension Choice:** Administrators can change any combination of AC Owner, Current User, Department, Cost Center, and Location. Unselected dimensions remain completely unchanged.
 2. **Distinct Person Separation:** AC Owner (`acOwnerId`) and Current User (`currentUserId`) are separate references to `Person`. AC Owner tracks `personalCode` (custodial responsibility), while Current User tracks `username` (operator identity). They are never conflated into a single field.
 3. **Intentional Nullable Unassign:** Explicitly selecting "Unassign (None)" sets the destination to `null`, distinct from omitting the dimension (which preserves existing values).
 4. **Non-Unique eForm Number:** In accordance with real-world administrative batch transfers, eForm Numbers are indexed (`CREATE INDEX`) but NOT unique (`CREATE UNIQUE INDEX` is forbidden), legitimately grouping transfers involving multiple assets under the same document.
-5. **Additive Backward-Compatible Schema:** Additive columns (`from_current_user_id`, `to_current_user_id`, `from_cost_center`, `to_cost_center`, and `change_*` boolean flags) were introduced via versioned migration `20261107000002_add_transfer_dimensions/migration.sql` with zero table drops or destructive alterations.
+5. **Partial Unique Index Pending Concurrency:** Versioned migration `20261107000003_add_pending_transfer_partial_unique_index/migration.sql` creates a partial unique index on `asset_id` filtered strictly by `WHERE status = 'PENDING'`. It guarantees at most one pending transfer per asset at the database level without restricting eForm number reuse.
+6. **Bounded History & UI Discovery:** Transfer history is paginated with validated limits (max 100), preventing unbounded payload fetches. The active `PENDING` transfer is always exposed so that viewing past history pages never hides pending actions or permits duplicate initiation.
+7. **Honest Network Uncertainty & Safe Reload:** If a mutation encounters a network interruption or unverified response, the UI informs administrators that persistence may have occurred, preserves draft form state, forbids blind auto-retries, and provides explicit read-only state reloads.
 
 ---
 
 ## 10. Verification & Test Suite
 
-Run the full automated test suite (107 tests across 17 test suites):
+Run the full automated test suite:
 
 ```bash
 npm run test
 ```
 
 ### Automated Check Suites:
-1. `test/transfer-workflow.test.ts`: **(P10)** Verifies transfer payload validation, rejection of forbidden asset/actor fields, single and multi-dimension support with nullable unassign, mandatory non-empty eForm on completion, non-unique eForm index invariant, additive schema and migration SQL integrity, unauthenticated 401 protection, and UUID validation.
+1. `test/transfer-workflow.test.ts`: **(P10 & P10-REWORK)** Verifies transfer payload validation, rejection of forbidden asset/actor fields, single and multi-dimension support with nullable unassign, mandatory non-empty eForm on completion, non-unique eForm index invariant, additive partial unique index migration SQL, pagination query validation, truthful transferStatus cancellation audit, status-guarded concurrency updates, unauthenticated 401 protection, and UUID validation.
 2. `test/asset-inline-editing.test.ts`: **(P09)** Verifies 9-field general allowlist, strict rejection of reserved assignment/verification fields (P10/P11), `computePatchDelta` changed-field-only payloads, blank-to-null normalization, no-op write suppression, client-side validation rules, and backend UUID enforcement.
 3. `test/asset-grid-ui.test.ts`: **(P08)** Verifies Grid URL search/filter serialization, defensive deserialization, and column default visibility rules.
 4. `test/asset-list-endpoints.test.ts`: **(P08)** Verifies `GET /api/assets` requireAdmin authentication (401), query preservation, and read-only CSRF exemption.

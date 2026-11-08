@@ -90,11 +90,31 @@ const TRANSFER_INCLUDE_RELATIONS = {
   },
 } as const;
 
+export interface TransferPaginationOptions {
+  page?: number;
+  limit?: number;
+}
+
+export interface PaginatedTransfersResult {
+  transfers: any[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  activePending: any | null;
+}
+
 export const transferService = {
   /**
-   * Retrieves all transfer records for an asset ordered newest-first.
+   * Retrieves bounded transfer records for an asset with deterministic ordering (newest first with id tie-breaker),
+   * pagination metadata, and active pending transfer record (accessible regardless of current page).
    */
-  async getTransfers(assetId: string) {
+  async getTransfers(
+    assetId: string,
+    options: TransferPaginationOptions = {}
+  ): Promise<PaginatedTransfersResult> {
     const asset = await prisma.asset.findUnique({
       where: { id: assetId },
       select: { id: true },
@@ -104,15 +124,53 @@ export const transferService = {
       throw new AssetNotFoundError(assetId);
     }
 
-    return await prisma.assetTransfer.findMany({
-      where: { assetId },
-      orderBy: { requestedAt: 'desc' },
+    const page = Math.max(1, options.page ? Math.floor(options.page) : 1);
+    const limit = Math.min(100, Math.max(1, options.limit ? Math.floor(options.limit) : 20));
+    const skip = (page - 1) * limit;
+
+    // Fetch active PENDING transfer record so it remains discoverable even on page > 1
+    const activePending = await prisma.assetTransfer.findFirst({
+      where: {
+        assetId,
+        status: TransferStatus.PENDING,
+      },
       include: TRANSFER_INCLUDE_RELATIONS,
     });
+
+    // Total transfers count for accurate pagination metadata
+    const total = await prisma.assetTransfer.count({
+      where: { assetId },
+    });
+
+    // Bounded fetch with deterministic newest-first ordering and id tie-breaker
+    const transfers = await prisma.assetTransfer.findMany({
+      where: { assetId },
+      orderBy: [
+        { requestedAt: 'desc' },
+        { id: 'desc' },
+      ],
+      skip,
+      take: limit,
+      include: TRANSFER_INCLUDE_RELATIONS,
+    });
+
+    const totalPages = Math.ceil(total / limit) || 1;
+
+    return {
+      transfers,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+      activePending,
+    };
   },
 
   /**
    * Creates a new PENDING transfer snapshotting origin values.
+   * Concurrency-safe: database-enforced against check-then-write race conditions.
    * Does NOT alter the asset's current assignments.
    */
   async createPendingTransfer(
@@ -128,7 +186,7 @@ export const transferService = {
       throw new AssetNotFoundError(assetId);
     }
 
-    // Conservative conflict detection: reject duplicate active pending transfers
+    // Conservative conflict detection: reject duplicate active pending transfers early
     const existingPending = await prisma.assetTransfer.findFirst({
       where: {
         assetId,
@@ -182,41 +240,58 @@ export const transferService = {
 
     // Persist new PENDING transfer record
     // Explicit origin snapshotting preserves full history before completion
-    const createdTransfer = await prisma.assetTransfer.create({
-      data: {
-        id: crypto.randomUUID(),
-        assetId,
-        fromPersonId: asset.acOwnerId,
-        toPersonId: input.changeAcOwner ? input.toPersonId : asset.acOwnerId,
-        fromCurrentUserId: asset.currentUserId,
-        toCurrentUserId: input.changeCurrentUser ? input.toCurrentUserId : asset.currentUserId,
-        fromDepartment: asset.department,
-        toDepartment: input.changeDepartment ? input.toDepartment : asset.department,
-        fromCostCenter: asset.costCenter,
-        toCostCenter: input.changeCostCenter ? input.toCostCenter : asset.costCenter,
-        fromLocationId: asset.locationId,
-        toLocationId: input.changeLocation ? input.toLocationId : asset.locationId,
-        changeAcOwner: input.changeAcOwner,
-        changeCurrentUser: input.changeCurrentUser,
-        changeDepartment: input.changeDepartment,
-        changeCostCenter: input.changeCostCenter,
-        changeLocation: input.changeLocation,
-        eformNumber: input.eformNumber,
-        notes: input.notes,
-        status: TransferStatus.PENDING,
-        createdBy: actor || 'admin',
-      },
-      include: TRANSFER_INCLUDE_RELATIONS,
-    });
+    try {
+      const createdTransfer = await prisma.assetTransfer.create({
+        data: {
+          id: crypto.randomUUID(),
+          assetId,
+          fromPersonId: asset.acOwnerId,
+          toPersonId: input.changeAcOwner ? input.toPersonId : asset.acOwnerId,
+          fromCurrentUserId: asset.currentUserId,
+          toCurrentUserId: input.changeCurrentUser ? input.toCurrentUserId : asset.currentUserId,
+          fromDepartment: asset.department,
+          toDepartment: input.changeDepartment ? input.toDepartment : asset.department,
+          fromCostCenter: asset.costCenter,
+          toCostCenter: input.changeCostCenter ? input.toCostCenter : asset.costCenter,
+          fromLocationId: asset.locationId,
+          toLocationId: input.changeLocation ? input.toLocationId : asset.locationId,
+          changeAcOwner: input.changeAcOwner,
+          changeCurrentUser: input.changeCurrentUser,
+          changeDepartment: input.changeDepartment,
+          changeCostCenter: input.changeCostCenter,
+          changeLocation: input.changeLocation,
+          eformNumber: input.eformNumber,
+          notes: input.notes,
+          status: TransferStatus.PENDING,
+          createdBy: actor || 'admin',
+        },
+        include: TRANSFER_INCLUDE_RELATIONS,
+      });
 
-    return createdTransfer;
+      return createdTransfer;
+    } catch (err: any) {
+      // Map PostgreSQL partial unique index / Prisma P2002 conflict to TransferConflictError (HTTP 409)
+      if (
+        err?.code === 'P2002' ||
+        (typeof err?.message === 'string' &&
+          (err.message.includes('asset_transfers_asset_id_pending_unique') ||
+            err.message.includes('unique constraint') ||
+            err.message.includes('Unique constraint failed')))
+      ) {
+        throw new TransferConflictError(
+          'Asset already has an active pending transfer. Complete or cancel it before initiating a new transfer.'
+        );
+      }
+      throw err;
+    }
   },
 
   /**
    * Completes a PENDING transfer atomically:
    * 1. Validates non-empty eForm Number (can repeat across different assets).
-   * 2. Checks stale conflicts (current asset values must still match origin snapshot).
-   * 3. In single transaction: updates asset assignment fields, marks transfer COMPLETED, appends AssetAuditEvent.
+   * 2. Exactly-once status-guarded transition on AssetTransfer.
+   * 3. Concurrency-safe compare-and-set conditional update on Asset changed dimensions.
+   * 4. Single transaction rollback ensures consistency and exactly one audit event.
    */
   async completeTransfer(
     assetId: string,
@@ -249,41 +324,6 @@ export const transferService = {
         );
       }
 
-      // Check current asset state for stale-state conflicts
-      const currentAsset = await tx.asset.findUnique({
-        where: { id: assetId },
-      });
-
-      if (!currentAsset) {
-        throw new AssetNotFoundError(assetId);
-      }
-
-      if (transfer.changeAcOwner && currentAsset.acOwnerId !== transfer.fromPersonId) {
-        throw new TransferConflictError(
-          "Stale transfer state detected: The asset's AC Owner has changed since this transfer was created."
-        );
-      }
-      if (transfer.changeCurrentUser && currentAsset.currentUserId !== transfer.fromCurrentUserId) {
-        throw new TransferConflictError(
-          "Stale transfer state detected: The asset's Current User has changed since this transfer was created."
-        );
-      }
-      if (transfer.changeDepartment && currentAsset.department !== transfer.fromDepartment) {
-        throw new TransferConflictError(
-          "Stale transfer state detected: The asset's Department has changed since this transfer was created."
-        );
-      }
-      if (transfer.changeCostCenter && currentAsset.costCenter !== transfer.fromCostCenter) {
-        throw new TransferConflictError(
-          "Stale transfer state detected: The asset's Cost Center has changed since this transfer was created."
-        );
-      }
-      if (transfer.changeLocation && currentAsset.locationId !== transfer.fromLocationId) {
-        throw new TransferConflictError(
-          "Stale transfer state detected: The asset's Location has changed since this transfer was created."
-        );
-      }
-
       // Validate destination entities still exist
       if (transfer.changeAcOwner && transfer.toPersonId) {
         const p = await tx.person.findUnique({ where: { id: transfer.toPersonId } });
@@ -310,47 +350,92 @@ export const transferService = {
         }
       }
 
-      // Build atomic updates for only explicitly changed dimensions
+      // 1. Status-guarded atomic conditional transition on AssetTransfer (Exactly-Once guarantee)
+      const updatedNotes = input.notes
+        ? transfer.notes
+          ? `${transfer.notes}\n[Completion Note]: ${input.notes}`
+          : input.notes
+        : transfer.notes;
+
+      const transferUpdateResult = await tx.assetTransfer.updateMany({
+        where: {
+          id: transferId,
+          assetId: assetId,
+          status: TransferStatus.PENDING,
+        },
+        data: {
+          status: TransferStatus.COMPLETED,
+          completedAt: new Date(),
+          eformNumber: finalEformNumber,
+          notes: updatedNotes,
+        },
+      });
+
+      if (transferUpdateResult.count === 0) {
+        const currentRecord = await tx.assetTransfer.findUnique({ where: { id: transferId } });
+        throw new TransferConflictError(
+          `Cannot complete transfer: Record is currently in '${currentRecord?.status || 'UNKNOWN'}' status (only PENDING transfers can be completed).`
+        );
+      }
+
+      // 2. Concurrency-safe Compare-and-Set conditional update on Asset
+      // Conditionally updates ONLY if current asset values match the origin snapshot of changed dimensions
+      const assetWhere: Record<string, unknown> = { id: assetId };
       const assetUpdateData: Record<string, unknown> = {};
       const changedFields: string[] = [];
       const beforeValues: Record<string, unknown> = {};
       const afterValues: Record<string, unknown> = {};
 
       if (transfer.changeAcOwner) {
+        assetWhere.acOwnerId = transfer.fromPersonId;
         assetUpdateData.acOwnerId = transfer.toPersonId;
         changedFields.push('acOwnerId');
         beforeValues.acOwnerId = transfer.fromPersonId;
         afterValues.acOwnerId = transfer.toPersonId;
       }
       if (transfer.changeCurrentUser) {
+        assetWhere.currentUserId = transfer.fromCurrentUserId;
         assetUpdateData.currentUserId = transfer.toCurrentUserId;
         changedFields.push('currentUserId');
         beforeValues.currentUserId = transfer.fromCurrentUserId;
         afterValues.currentUserId = transfer.toCurrentUserId;
       }
       if (transfer.changeDepartment) {
+        assetWhere.department = transfer.fromDepartment;
         assetUpdateData.department = transfer.toDepartment;
         changedFields.push('department');
         beforeValues.department = transfer.fromDepartment;
         afterValues.department = transfer.toDepartment;
       }
       if (transfer.changeCostCenter) {
+        assetWhere.costCenter = transfer.fromCostCenter;
         assetUpdateData.costCenter = transfer.toCostCenter;
         changedFields.push('costCenter');
         beforeValues.costCenter = transfer.fromCostCenter;
         afterValues.costCenter = transfer.toCostCenter;
       }
       if (transfer.changeLocation) {
+        assetWhere.locationId = transfer.fromLocationId;
         assetUpdateData.locationId = transfer.toLocationId;
         changedFields.push('locationId');
         beforeValues.locationId = transfer.fromLocationId;
         afterValues.locationId = transfer.toLocationId;
       }
 
-      // 1. Update Asset
-      const updatedAsset = await tx.asset.update({
-        where: { id: assetId },
+      const assetUpdateResult = await tx.asset.updateMany({
+        where: assetWhere,
         data: assetUpdateData,
+      });
+
+      if (assetUpdateResult.count === 0) {
+        throw new TransferConflictError(
+          "Stale transfer state detected: One or more asset assignment fields have changed since this transfer was created."
+        );
+      }
+
+      // Fetch the updated asset and transfer records for truthful response payload
+      const updatedAsset = await tx.asset.findUnique({
+        where: { id: assetId },
         include: {
           type: true,
           location: true,
@@ -360,23 +445,12 @@ export const transferService = {
         },
       });
 
-      // 2. Mark Transfer Completed
-      const completedTransfer = await tx.assetTransfer.update({
+      const completedTransfer = await tx.assetTransfer.findUnique({
         where: { id: transferId },
-        data: {
-          status: TransferStatus.COMPLETED,
-          completedAt: new Date(),
-          eformNumber: finalEformNumber,
-          notes: input.notes
-            ? transfer.notes
-              ? `${transfer.notes}\n[Completion Note]: ${input.notes}`
-              : input.notes
-            : transfer.notes,
-        },
         include: TRANSFER_INCLUDE_RELATIONS,
       });
 
-      // 3. Append Transactional Audit Event
+      // 3. Append Transactional Audit Event (Exactly-once, guaranteed by transaction)
       const operationId = crypto.randomUUID();
       const auditEvent = await tx.assetAuditEvent.create({
         data: {
@@ -394,17 +468,18 @@ export const transferService = {
       });
 
       return {
-        transfer: completedTransfer,
-        asset: updatedAsset,
+        transfer: completedTransfer!,
+        asset: updatedAsset!,
         auditEvent,
       };
     });
   },
 
   /**
-   * Cancels a PENDING transfer:
-   * Leaves asset assignment values strictly unchanged.
-   * Marks transfer status CANCELLED with cancelledAt timestamp and records cancellation audit event.
+   * Cancels a PENDING transfer atomically:
+   * 1. Status-guarded atomic updateMany guarantees exactly-once cancellation.
+   * 2. Asset assignment values remain strictly unchanged.
+   * 3. Records truthful transfer-scoped audit event (transferStatus, never Asset.status).
    */
   async cancelTransfer(
     assetId: string,
@@ -429,22 +504,40 @@ export const transferService = {
         );
       }
 
-      // Mark Transfer Cancelled
-      const cancelledTransfer = await tx.assetTransfer.update({
-        where: { id: transferId },
+      const updatedNotes = input.notes
+        ? transfer.notes
+          ? `${transfer.notes}\n[Cancellation Note]: ${input.notes}`
+          : input.notes
+        : transfer.notes;
+
+      // Exactly-once status-guarded atomic update
+      const updateResult = await tx.assetTransfer.updateMany({
+        where: {
+          id: transferId,
+          assetId: assetId,
+          status: TransferStatus.PENDING,
+        },
         data: {
           status: TransferStatus.CANCELLED,
           cancelledAt: new Date(),
-          notes: input.notes
-            ? transfer.notes
-              ? `${transfer.notes}\n[Cancellation Note]: ${input.notes}`
-              : input.notes
-            : transfer.notes,
+          notes: updatedNotes,
         },
+      });
+
+      if (updateResult.count === 0) {
+        const currentRecord = await tx.assetTransfer.findUnique({ where: { id: transferId } });
+        throw new TransferConflictError(
+          `Cannot cancel transfer: Record is currently in '${currentRecord?.status || 'UNKNOWN'}' status (only PENDING transfers can be cancelled).`
+        );
+      }
+
+      const cancelledTransfer = await tx.assetTransfer.findUnique({
+        where: { id: transferId },
         include: TRANSFER_INCLUDE_RELATIONS,
       });
 
-      // Append Audit Event for cancellation
+      // Truthful transfer-scoped audit event:
+      // Asset.status does NOT change! Clearly scoped to transferStatus and identifies the transfer record.
       const operationId = crypto.randomUUID();
       const auditEvent = await tx.assetAuditEvent.create({
         data: {
@@ -455,14 +548,14 @@ export const transferService = {
           action: 'TRANSFER_CANCELLED',
           operationId,
           eformNumber: transfer.eformNumber,
-          changedFields: ['status'] as any,
-          beforeValues: { status: 'PENDING' } as any,
-          afterValues: { status: 'CANCELLED' } as any,
+          changedFields: ['transferStatus'] as any,
+          beforeValues: { transferStatus: 'PENDING', transferId: transfer.id } as any,
+          afterValues: { transferStatus: 'CANCELLED', transferId: transfer.id } as any,
         },
       });
 
       return {
-        transfer: cancelledTransfer,
+        transfer: cancelledTransfer!,
         auditEvent,
       };
     });

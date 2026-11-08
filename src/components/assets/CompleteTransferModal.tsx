@@ -9,6 +9,7 @@ import {
   FileCheck,
   ArrowRight,
   ShieldAlert,
+  RefreshCw,
 } from 'lucide-react';
 
 interface CompleteTransferModalProps {
@@ -32,12 +33,14 @@ export const CompleteTransferModal: React.FC<CompleteTransferModalProps> = ({
   const [completionNotes, setCompletionNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isUncertainError, setIsUncertainError] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setEformNumber(transfer.eformNumber || '');
       setCompletionNotes('');
       setErrorMessage(null);
+      setIsUncertainError(false);
     }
   }, [isOpen, transfer]);
 
@@ -97,7 +100,11 @@ export const CompleteTransferModal: React.FC<CompleteTransferModalProps> = ({
         setErrorMessage(data.error || `Failed to complete transfer (Status: ${res.status}).`);
       }
     } catch {
-      setErrorMessage('Network error while completing transfer. Database may be unreachable.');
+      // Honest uncertain-network feedback: Persistence may have occurred. Never auto-retry. Keep form state intact.
+      setIsUncertainError(true);
+      setErrorMessage(
+        'Network or verification uncertainty: The completion response could not be confirmed. The transfer completion may have already persisted on the server. Please reload the asset transfer state before attempting to retry, and do NOT repeat submission blindly.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -142,11 +149,39 @@ export const CompleteTransferModal: React.FC<CompleteTransferModalProps> = ({
         {/* Content Form */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
           {errorMessage && (
-            <div className="p-3.5 rounded bg-rose-950/50 border border-rose-800/60 text-rose-300 text-xs font-mono flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <div>
-                <strong className="block font-semibold">Completion Failed:</strong>
-                <span>{errorMessage}</span>
+            <div
+              className={`p-3.5 rounded text-xs font-mono flex items-start gap-2.5 ${
+                isUncertainError
+                  ? 'bg-amber-950/60 border border-amber-700/70 text-amber-200'
+                  : 'bg-rose-950/50 border border-rose-800/60 text-rose-300'
+              }`}
+            >
+              <AlertCircle
+                className={`w-4 h-4 shrink-0 mt-0.5 ${
+                  isUncertainError ? 'text-amber-400' : 'text-rose-400'
+                }`}
+              />
+              <div className="space-y-2 flex-1">
+                <div>
+                  <strong className="block font-semibold">
+                    {isUncertainError ? 'Action Unverified (Persistence Possible):' : 'Completion Failed:'}
+                  </strong>
+                  <span>{errorMessage}</span>
+                </div>
+                {isUncertainError && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onCompleted();
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold bg-[#181d28] border border-amber-600/60 text-amber-300 hover:text-white hover:bg-[#202736] cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3 text-amber-400" />
+                      Reload Transfer State
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}

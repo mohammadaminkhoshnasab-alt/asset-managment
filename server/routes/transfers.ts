@@ -5,6 +5,7 @@ import {
   validateCreateTransferInput,
   validateCompleteTransferInput,
   validateCancelTransferInput,
+  validateTransferPaginationQuery,
 } from '../validators/transferValidators.ts';
 import {
   transferService,
@@ -22,7 +23,8 @@ function getSessionActor(req: Request): string {
 
 /**
  * GET /api/assets/:assetId/transfers
- * Retrieves chronological transfer records for an asset with resolved lookup relations.
+ * Retrieves bounded chronological transfer records for an asset with resolved lookup relations.
+ * Enforces validated page/limit pagination (max 100) and exposes any active pending transfer.
  */
 transferRouter.get('/', async (req: Request, res: Response) => {
   const { assetId } = req.params;
@@ -35,11 +37,23 @@ transferRouter.get('/', async (req: Request, res: Response) => {
     return;
   }
 
+  const paginationValidation = validateTransferPaginationQuery(req.query as Record<string, unknown>);
+  if (!paginationValidation.valid) {
+    res.status(400).json({
+      status: 'error',
+      error: paginationValidation.error,
+      field: paginationValidation.field,
+    });
+    return;
+  }
+
   try {
-    const transfers = await transferService.getTransfers(assetId);
+    const result = await transferService.getTransfers(assetId, paginationValidation.data);
     res.status(200).json({
       status: 'ok',
-      data: transfers,
+      data: result.transfers,
+      pagination: result.pagination,
+      activePending: result.activePending,
     });
   } catch (err: any) {
     if (err instanceof AssetNotFoundError) {

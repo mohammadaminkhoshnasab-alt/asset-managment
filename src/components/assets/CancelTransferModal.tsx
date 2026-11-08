@@ -6,6 +6,7 @@ import {
   X,
   AlertCircle,
   Ban,
+  RefreshCw,
 } from 'lucide-react';
 
 interface CancelTransferModalProps {
@@ -28,6 +29,7 @@ export const CancelTransferModal: React.FC<CancelTransferModalProps> = ({
   const [cancelNotes, setCancelNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isUncertainError, setIsUncertainError] = useState(false);
 
   if (!isOpen) return null;
 
@@ -75,7 +77,11 @@ export const CancelTransferModal: React.FC<CancelTransferModalProps> = ({
         setErrorMessage(data.error || `Failed to cancel transfer (Status: ${res.status}).`);
       }
     } catch {
-      setErrorMessage('Network connection failure. Server or database is unreachable.');
+      // Honest uncertain-network feedback: Persistence may have occurred. Never auto-retry. Keep form state intact.
+      setIsUncertainError(true);
+      setErrorMessage(
+        'Network or verification uncertainty: The cancellation response could not be confirmed. The transfer cancellation may have already persisted on the server. Please reload the asset transfer state before attempting to retry, and do NOT repeat submission blindly.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -120,11 +126,39 @@ export const CancelTransferModal: React.FC<CancelTransferModalProps> = ({
         {/* Content Form */}
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           {errorMessage && (
-            <div className="p-3.5 rounded bg-rose-950/50 border border-rose-800/60 text-rose-300 text-xs font-mono flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <div>
-                <strong className="block font-semibold">Cancellation Failed:</strong>
-                <span>{errorMessage}</span>
+            <div
+              className={`p-3.5 rounded text-xs font-mono flex items-start gap-2.5 ${
+                isUncertainError
+                  ? 'bg-amber-950/60 border border-amber-700/70 text-amber-200'
+                  : 'bg-rose-950/50 border border-rose-800/60 text-rose-300'
+              }`}
+            >
+              <AlertCircle
+                className={`w-4 h-4 shrink-0 mt-0.5 ${
+                  isUncertainError ? 'text-amber-400' : 'text-rose-400'
+                }`}
+              />
+              <div className="space-y-2 flex-1">
+                <div>
+                  <strong className="block font-semibold">
+                    {isUncertainError ? 'Action Unverified (Persistence Possible):' : 'Cancellation Failed:'}
+                  </strong>
+                  <span>{errorMessage}</span>
+                </div>
+                {isUncertainError && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onCancelled();
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold bg-[#181d28] border border-amber-600/60 text-amber-300 hover:text-white hover:bg-[#202736] cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3 text-amber-400" />
+                      Reload Transfer State
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
