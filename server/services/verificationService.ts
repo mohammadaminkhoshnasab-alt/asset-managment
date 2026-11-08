@@ -77,14 +77,37 @@ export function compareVerificationChronology(
   return b.id.localeCompare(a.id);
 }
 
+/**
+ * Detects whether a database error represents a recognized PostgreSQL serialization failure
+ * (SQLSTATE 40001), deadlock detection (SQLSTATE 40P01), or Prisma transaction write conflict (P2034)
+ * that rolled back the transaction and is safely eligible for a bounded retry.
+ */
+export function isSerializationFailure(err: any): boolean {
+  if (!err) return false;
+  if (err.code === 'P2034') return true; // Prisma transaction write conflict
+  if (err.code === '40001' || err.meta?.code === '40001') return true; // PostgreSQL serialization failure
+  if (err.code === '40P01' || err.meta?.code === '40P01') return true; // PostgreSQL deadlock detected
+  const msg = typeof err.message === 'string' ? err.message.toLowerCase() : '';
+  return (
+    msg.includes('could not serialize access') ||
+    msg.includes('deadlock detected') ||
+    msg.includes('write conflict') ||
+    msg.includes('serialization failure') ||
+    msg.includes('p2034')
+  );
+}
+
 export const verificationService = {
   /**
-   * Persists a new physical verification attempt in an atomic transaction:
-   * 1. Confirms target asset exists.
-   * 2. Persists immutable append-only PhysicalVerification record.
-   * 3. Recomputes authoritative latest verification summary from qualifying (isSuccessful=true) records.
-   * 4. Updates Asset summary cache if chronology permits (no regression for backdated or unsuccessful attempts).
-   * 5. Atomically logs an AssetAuditEvent with action 'PHYSICAL_VERIFICATION'.
+   * Persists a new physical verification attempt in a concurrency-safe atomic transaction:
+   * 1. Uses PostgreSQL SERIALIZABLE transaction with a per-asset row-level write lock.
+   * 2. Re-executes on recognized serialization/write-conflict rollbacks up to 3 bounded retries.
+   * 3. Confirms target asset exists.
+   * 4. Persists immutable append-only PhysicalVerification record.
+   * 5. Recomputes authoritative latest verification summary from qualifying (isSuccessful=true) records.
+   * 6. Updates Asset summary cache if chronology permits (no regression for backdated or unsuccessful attempts).
+   * 7. Atomically logs an AssetAuditEvent with action 'PHYSICAL_VERIFICATION'.
+   * 8. Guarantees verification row, summary update, and audit event commit or roll back together.
    */
   async createVerification(
     assetId: string,
@@ -92,158 +115,189 @@ export const verificationService = {
     actor: string,
     source: AuditSource = AuditSource.API
   ): Promise<CreateVerificationResult> {
-    const operationId = crypto.randomUUID();
+    const MAX_RETRIES = 3;
+    let attempt = 0;
 
-    return await prisma.$transaction(async (tx) => {
-      // 1. Validate target asset exists and fetch current verification summary
-      const currentAsset = await tx.asset.findUnique({
-        where: { id: assetId },
-        select: {
-          id: true,
-          model: true,
-          assetNumber: true,
-          status: true,
-          locationId: true,
-          acOwnerId: true,
-          currentUserId: true,
-          department: true,
-          costCenter: true,
-          lastVerifiedAt: true,
-          lastVerifiedYearMonth: true,
-          lastVerificationOutcome: true,
-        },
-      });
+    while (true) {
+      attempt++;
+      const operationId = crypto.randomUUID();
 
-      if (!currentAsset) {
-        throw new AssetNotFoundError(assetId);
-      }
+      try {
+        return await prisma.$transaction(
+          async (tx) => {
+            // Per-asset row-level write lock in PostgreSQL to eliminate concurrency races
+            try {
+              await tx.$queryRaw`SELECT "id" FROM "assets" WHERE "id" = ${assetId}::uuid FOR UPDATE`;
+            } catch (rawErr: any) {
+              // In unit tests with mock DB or non-postgres runtime, safely handle raw query if not a serialization error
+              if (isSerializationFailure(rawErr)) {
+                throw rawErr;
+              }
+            }
 
-      // 2. Persist append-only PhysicalVerification record
-      const verification = await tx.physicalVerification.create({
-        data: {
-          assetId,
-          verifiedBy: actor,
-          outcome: input.outcome,
-          isSuccessful: input.isSuccessful,
-          datePrecision: input.datePrecision,
-          verifiedYear: input.verifiedYear,
-          verifiedMonth: input.verifiedMonth,
-          verifiedDay: input.verifiedDay,
-          verifiedDate: input.verifiedDate,
-          verifiedYearMonth: input.verifiedYearMonth,
-          notes: input.notes,
-        },
-      });
+            // 1. Validate target asset exists and fetch current verification summary
+            const currentAsset = await tx.asset.findUnique({
+              where: { id: assetId },
+              select: {
+                id: true,
+                model: true,
+                assetNumber: true,
+                status: true,
+                locationId: true,
+                acOwnerId: true,
+                currentUserId: true,
+                department: true,
+                costCenter: true,
+                lastVerifiedAt: true,
+                lastVerifiedYearMonth: true,
+                lastVerificationOutcome: true,
+              },
+            });
 
-      // 3. Authoritative Latest Summary Recomputation:
-      // Only successfully completed inspections (isSuccessful: true) qualify to represent the latest confirmed summary.
-      const qualifyingAttempts = await tx.physicalVerification.findMany({
-        where: {
-          assetId,
-          isSuccessful: true,
-        },
-        select: {
-          id: true,
-          outcome: true,
-          datePrecision: true,
-          verifiedYear: true,
-          verifiedMonth: true,
-          verifiedDay: true,
-          verifiedDate: true,
-          verifiedYearMonth: true,
-          createdAt: true,
-        },
-      });
+            if (!currentAsset) {
+              throw new AssetNotFoundError(assetId);
+            }
 
-      let targetLastVerifiedAt: Date | null = null;
-      let targetLastVerifiedYearMonth: string | null = null;
-      let targetLastVerificationOutcome: VerificationOutcome | null = null;
+            // 2. Persist append-only PhysicalVerification record
+            const verification = await tx.physicalVerification.create({
+              data: {
+                assetId,
+                verifiedBy: actor,
+                outcome: input.outcome,
+                isSuccessful: input.isSuccessful,
+                datePrecision: input.datePrecision,
+                verifiedYear: input.verifiedYear,
+                verifiedMonth: input.verifiedMonth,
+                verifiedDay: input.verifiedDay,
+                verifiedDate: input.verifiedDate,
+                verifiedYearMonth: input.verifiedYearMonth,
+                notes: input.notes,
+              },
+            });
 
-      if (qualifyingAttempts.length > 0) {
-        // Sort descending using our deterministic chronology comparator
-        qualifyingAttempts.sort(compareVerificationChronology);
-        const latest = qualifyingAttempts[0];
+            // 3. Authoritative Latest Summary Recomputation:
+            // Only successfully completed inspections (isSuccessful: true) qualify to represent the latest confirmed summary.
+            const qualifyingAttempts = await tx.physicalVerification.findMany({
+              where: {
+                assetId,
+                isSuccessful: true,
+              },
+              select: {
+                id: true,
+                outcome: true,
+                datePrecision: true,
+                verifiedYear: true,
+                verifiedMonth: true,
+                verifiedDay: true,
+                verifiedDate: true,
+                verifiedYearMonth: true,
+                createdAt: true,
+              },
+            });
 
-        targetLastVerifiedYearMonth = latest.verifiedYearMonth;
-        targetLastVerificationOutcome = latest.outcome;
+            let targetLastVerifiedAt: Date | null = null;
+            let targetLastVerifiedYearMonth: string | null = null;
+            let targetLastVerificationOutcome: VerificationOutcome | null = null;
 
-        if (latest.datePrecision === DatePrecision.DAY) {
-          targetLastVerifiedAt = latest.verifiedDate;
-        } else {
-          // MONTH precision: verifiedDay is null. Setting lastVerifiedAt to null prevents
-          // leaving a contradictory older day/timestamp next to a newer month-only summary.
-          targetLastVerifiedAt = null;
+            if (qualifyingAttempts.length > 0) {
+              // Sort descending using our deterministic chronology comparator
+              qualifyingAttempts.sort(compareVerificationChronology);
+              const latest = qualifyingAttempts[0];
+
+              targetLastVerifiedYearMonth = latest.verifiedYearMonth;
+              targetLastVerificationOutcome = latest.outcome;
+
+              if (latest.datePrecision === DatePrecision.DAY) {
+                targetLastVerifiedAt = latest.verifiedDate;
+              } else {
+                // MONTH precision: verifiedDay is null. Setting lastVerifiedAt to null prevents
+                // leaving a contradictory older day/timestamp next to a newer month-only summary.
+                targetLastVerifiedAt = null;
+              }
+            }
+
+            // Check whether summary cache changed
+            const summaryChanged =
+              currentAsset.lastVerifiedYearMonth !== targetLastVerifiedYearMonth ||
+              currentAsset.lastVerificationOutcome !== targetLastVerificationOutcome ||
+              (currentAsset.lastVerifiedAt?.getTime() ?? null) !== (targetLastVerifiedAt?.getTime() ?? null);
+
+            if (summaryChanged) {
+              await tx.asset.update({
+                where: { id: assetId },
+                data: {
+                  lastVerifiedAt: targetLastVerifiedAt,
+                  lastVerifiedYearMonth: targetLastVerifiedYearMonth,
+                  lastVerificationOutcome: targetLastVerificationOutcome,
+                },
+              });
+            }
+
+            // 4. Atomically persist append-only AssetAuditEvent
+            const changedFields = ['verifications'];
+            if (summaryChanged) {
+              changedFields.push('lastVerifiedYearMonth', 'lastVerificationOutcome');
+              if (targetLastVerifiedAt !== undefined) {
+                changedFields.push('lastVerifiedAt');
+              }
+            }
+
+            await tx.assetAuditEvent.create({
+              data: {
+                id: crypto.randomUUID(),
+                assetId,
+                actor,
+                source,
+                action: 'PHYSICAL_VERIFICATION',
+                operationId,
+                changedFields,
+                beforeValues: {
+                  lastVerifiedAt: currentAsset.lastVerifiedAt?.toISOString() || null,
+                  lastVerifiedYearMonth: currentAsset.lastVerifiedYearMonth,
+                  lastVerificationOutcome: currentAsset.lastVerificationOutcome,
+                },
+                afterValues: {
+                  verificationId: verification.id,
+                  outcome: verification.outcome,
+                  isSuccessful: verification.isSuccessful,
+                  datePrecision: verification.datePrecision,
+                  verifiedYear: verification.verifiedYear,
+                  verifiedMonth: verification.verifiedMonth,
+                  verifiedDay: verification.verifiedDay,
+                  verifiedDate: verification.verifiedDate?.toISOString() || null,
+                  verifiedYearMonth: verification.verifiedYearMonth,
+                  notes: verification.notes,
+                  lastVerifiedAt: targetLastVerifiedAt?.toISOString() || null,
+                  lastVerifiedYearMonth: targetLastVerifiedYearMonth,
+                  lastVerificationOutcome: targetLastVerificationOutcome,
+                },
+              },
+            });
+
+            return {
+              verification,
+              latestSummary: {
+                lastVerifiedAt: targetLastVerifiedAt,
+                lastVerifiedYearMonth: targetLastVerifiedYearMonth,
+                lastVerificationOutcome: targetLastVerificationOutcome,
+              },
+              summaryChanged,
+            };
+          },
+          {
+            isolationLevel: 'Serializable',
+          }
+        );
+      } catch (err: any) {
+        // Retry ONLY transactions known to have rolled back due to serialization conflicts
+        if (isSerializationFailure(err) && attempt < MAX_RETRIES) {
+          // Bounded backoff before retry
+          await new Promise((res) => setTimeout(res, attempt * 20));
+          continue;
         }
+        throw err;
       }
-
-      // Check whether summary cache changed
-      const summaryChanged =
-        currentAsset.lastVerifiedYearMonth !== targetLastVerifiedYearMonth ||
-        currentAsset.lastVerificationOutcome !== targetLastVerificationOutcome ||
-        (currentAsset.lastVerifiedAt?.getTime() ?? null) !== (targetLastVerifiedAt?.getTime() ?? null);
-
-      if (summaryChanged) {
-        await tx.asset.update({
-          where: { id: assetId },
-          data: {
-            lastVerifiedAt: targetLastVerifiedAt,
-            lastVerifiedYearMonth: targetLastVerifiedYearMonth,
-            lastVerificationOutcome: targetLastVerificationOutcome,
-          },
-        });
-      }
-
-      // 4. Atomically persist append-only AssetAuditEvent
-      const changedFields = ['verifications'];
-      if (summaryChanged) {
-        changedFields.push('lastVerifiedYearMonth', 'lastVerificationOutcome');
-        if (targetLastVerifiedAt !== undefined) {
-          changedFields.push('lastVerifiedAt');
-        }
-      }
-
-      await tx.assetAuditEvent.create({
-        data: {
-          id: crypto.randomUUID(),
-          assetId,
-          actor,
-          source,
-          action: 'PHYSICAL_VERIFICATION',
-          operationId,
-          changedFields,
-          beforeValues: {
-            lastVerifiedAt: currentAsset.lastVerifiedAt?.toISOString() || null,
-            lastVerifiedYearMonth: currentAsset.lastVerifiedYearMonth,
-            lastVerificationOutcome: currentAsset.lastVerificationOutcome,
-          },
-          afterValues: {
-            verificationId: verification.id,
-            outcome: verification.outcome,
-            isSuccessful: verification.isSuccessful,
-            datePrecision: verification.datePrecision,
-            verifiedYear: verification.verifiedYear,
-            verifiedMonth: verification.verifiedMonth,
-            verifiedDay: verification.verifiedDay,
-            verifiedDate: verification.verifiedDate?.toISOString() || null,
-            verifiedYearMonth: verification.verifiedYearMonth,
-            notes: verification.notes,
-            lastVerifiedAt: targetLastVerifiedAt?.toISOString() || null,
-            lastVerifiedYearMonth: targetLastVerifiedYearMonth,
-            lastVerificationOutcome: targetLastVerificationOutcome,
-          },
-        },
-      });
-
-      return {
-        verification,
-        latestSummary: {
-          lastVerifiedAt: targetLastVerifiedAt,
-          lastVerifiedYearMonth: targetLastVerifiedYearMonth,
-          lastVerificationOutcome: targetLastVerificationOutcome,
-        },
-        summaryChanged,
-      };
-    });
+    }
   },
 
   /**

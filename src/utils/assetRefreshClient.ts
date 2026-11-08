@@ -1,7 +1,28 @@
 import type { AssetDetails, AssetAuditEventRecord } from '../types/asset.ts';
 import type { AssetTransferRecord } from '../types/transfer.ts';
+import type { PhysicalVerificationRecord } from '../types/verification.ts';
 
-export type MutationType = 'create' | 'complete' | 'cancel';
+export type MutationType = 'create' | 'complete' | 'cancel' | 'verification';
+
+export interface VerificationHistoryFetchResult {
+  ok: boolean;
+  status?: number;
+  isNetworkError?: boolean;
+  error?: string;
+  data?: PhysicalVerificationRecord[];
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface AuthoritativeRefreshOptions {
+  includeVerifications?: boolean;
+  verificationsPage?: number;
+  verificationsLimit?: number;
+}
 
 export interface AuthoritativeRefreshResult {
   ok: boolean;
@@ -24,6 +45,15 @@ export interface AuthoritativeRefreshResult {
       totalPages: number;
     };
   };
+  verificationsData?: {
+    records: PhysicalVerificationRecord[];
+    pagination?: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  };
   details: {
     assetOk: boolean;
     assetStatus?: number;
@@ -31,6 +61,8 @@ export interface AuthoritativeRefreshResult {
     historyStatus?: number;
     transfersOk: boolean;
     transfersStatus?: number;
+    verificationsOk?: boolean;
+    verificationsStatus?: number;
   };
 }
 
@@ -47,28 +79,111 @@ export interface PostMutationFeedbackState {
 }
 
 /**
+ * Executes a strictly read-only (GET only) fetch of Physical Verification History:
+ * GET /api/assets/:id/verifications
+ *
+ * Truthfully identifies complete success, non-2xx HTTP responses, malformed responses,
+ * and network connection errors.
+ */
+export async function fetchVerificationHistory(
+  assetId: string,
+  page: number = 1,
+  limit: number = 10,
+  fetchImpl: typeof fetch = fetch
+): Promise<VerificationHistoryFetchResult> {
+  let res: Response;
+  try {
+    res = await fetchImpl(`/api/assets/${assetId}/verifications?page=${page}&limit=${limit}`, {
+      credentials: 'include',
+    });
+  } catch (err: any) {
+    return {
+      ok: false,
+      isNetworkError: true,
+      error: 'Network connection error: Failed to reach server when fetching physical verification history.',
+    };
+  }
+
+  if (!res.ok) {
+    let errorMsg = `Failed to load verification history from server (HTTP ${res.status}).`;
+    if (res.status === 404) {
+      errorMsg = `Asset '${assetId}' not found in database (404).`;
+    } else if (res.status === 401) {
+      errorMsg = 'Administrative session expired (401 Unauthorized). Please sign in.';
+    } else if (res.status === 500) {
+      errorMsg = 'Internal server error encountered while querying verification records (500).';
+    }
+    return {
+      ok: false,
+      status: res.status,
+      isNetworkError: false,
+      error: errorMsg,
+    };
+  }
+
+  try {
+    const json = await res.json();
+    return {
+      ok: true,
+      status: res.status,
+      data: json.data || [],
+      pagination: json.pagination,
+    };
+  } catch {
+    return {
+      ok: false,
+      status: res.status,
+      error: 'Malformed JSON response when parsing physical verification records from server.',
+    };
+  }
+}
+
+/**
  * Executes a strictly read-only (GET only) authoritative refresh of:
  * 1. Asset Details (/api/assets/:id)
  * 2. Recent Audit History (/api/assets/:id/history)
  * 3. Transfer History (/api/assets/:id/transfers)
+ * 4. (Optional / P11) Physical Verification History (/api/assets/:id/verifications)
  *
  * Truthfully identifies complete success, complete failure, network errors,
- * non-2xx HTTP responses, and partial read failures.
+ * non-2xx HTTP responses, and partial read failures across all queried endpoints.
  */
 export async function executeAuthoritativeRefresh(
   assetId: string,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  options?: AuthoritativeRefreshOptions
 ): Promise<AuthoritativeRefreshResult> {
   let assetRes: Response | undefined;
   let historyRes: Response | undefined;
   let transferRes: Response | undefined;
+  let verificationsRes: Response | undefined;
+
+  const includeVerifications = !!options?.includeVerifications;
+  const vPage = options?.verificationsPage || 1;
+  const vLimit = options?.verificationsLimit || 10;
 
   try {
-    [assetRes, historyRes, transferRes] = await Promise.all([
+    const promises: Promise<Response>[] = [
       fetchImpl(`/api/assets/${assetId}`, { credentials: 'include' }),
       fetchImpl(`/api/assets/${assetId}/history?page=1&limit=5`, { credentials: 'include' }),
       fetchImpl(`/api/assets/${assetId}/transfers?page=1&limit=10`, { credentials: 'include' }),
-    ]);
+    ];
+
+    if (includeVerifications) {
+      promises.push(
+        fetchImpl(`/api/assets/${assetId}/verifications?page=${vPage}&limit=${vLimit}`, {
+          credentials: 'include',
+        })
+      );
+    }
+
+    const responses = await Promise.all(promises);
+    assetRes = responses[0];
+    historyRes = responses[1];
+    transferRes = responses[2];
+    if (includeVerifications) {
+      verificationsRes = responses[3];
+    }
   } catch (err: any) {
     return {
       ok: false,
@@ -78,6 +193,7 @@ export async function executeAuthoritativeRefresh(
         assetOk: false,
         historyOk: false,
         transfersOk: false,
+        verificationsOk: includeVerifications ? false : undefined,
       },
     };
   }
@@ -85,6 +201,7 @@ export async function executeAuthoritativeRefresh(
   const assetOk = assetRes.ok;
   const historyOk = historyRes.ok;
   const transfersOk = transferRes.ok;
+  const verificationsOk = includeVerifications ? !!verificationsRes?.ok : undefined;
 
   const details = {
     assetOk,
@@ -93,6 +210,8 @@ export async function executeAuthoritativeRefresh(
     historyStatus: historyRes.status,
     transfersOk,
     transfersStatus: transferRes.status,
+    verificationsOk,
+    verificationsStatus: verificationsRes?.status,
   };
 
   // 1. Primary Asset Record failure
@@ -171,24 +290,57 @@ export async function executeAuthoritativeRefresh(
     }
   }
 
-  // 2. Check for Partial Read Failures (History or Transfers failed)
-  if (!historyOk || !transfersOk || !historyData || !transfersData) {
-    const failedParts: string[] = [];
-    if (!historyOk || !historyData) {
-      failedParts.push(`audit history (HTTP ${historyRes.status})`);
+  // Parse Verifications Data if verifications request was included and succeeded
+  let verificationsData:
+    | {
+        records: PhysicalVerificationRecord[];
+        pagination?: { page: number; limit: number; total: number; totalPages: number };
+      }
+    | undefined;
+
+  if (includeVerifications && verificationsRes && verificationsOk) {
+    try {
+      const verificationsJson = await verificationsRes.json();
+      verificationsData = {
+        records: verificationsJson.data || [],
+        pagination: verificationsJson.pagination,
+      };
+    } catch {
+      // Ignored here, caught by partial failure check below
     }
-    if (!transfersOk || !transfersData) {
+  }
+
+  // 2. Check for Partial Read Failures
+  const hasHistoryFailure = !historyOk || !historyData;
+  const hasTransfersFailure = !transfersOk || !transfersData;
+  const hasVerificationsFailure = includeVerifications && (!verificationsOk || !verificationsData);
+
+  if (hasHistoryFailure || hasTransfersFailure || hasVerificationsFailure) {
+    const failedParts: string[] = [];
+    let failureStatusCode: number | undefined;
+
+    if (hasHistoryFailure) {
+      failedParts.push(`audit history (HTTP ${historyRes.status})`);
+      failureStatusCode = failureStatusCode || historyRes.status;
+    }
+    if (hasTransfersFailure) {
       failedParts.push(`transfer records (HTTP ${transferRes.status})`);
+      failureStatusCode = failureStatusCode || transferRes.status;
+    }
+    if (hasVerificationsFailure && verificationsRes) {
+      failedParts.push(`physical verification records (HTTP ${verificationsRes.status})`);
+      failureStatusCode = failureStatusCode || verificationsRes.status;
     }
 
     return {
       ok: false,
       partialFailure: true,
       error: `Partial refresh failure: Asset specification was loaded, but ${failedParts.join(' and ')} failed to refresh.`,
-      statusCode: !transfersOk ? transferRes.status : historyRes.status,
+      statusCode: failureStatusCode,
       assetData,
       historyData,
       transfersData,
+      verificationsData,
       details,
     };
   }
@@ -199,6 +351,7 @@ export async function executeAuthoritativeRefresh(
     assetData,
     historyData,
     transfersData,
+    verificationsData,
     details,
   };
 }
@@ -217,16 +370,28 @@ export function evaluatePostMutationRefresh(
       ? 'Transfer initiation'
       : mutationType === 'complete'
       ? 'Transfer completion'
-      : 'Transfer cancellation';
+      : mutationType === 'cancel'
+      ? 'Transfer cancellation'
+      : 'Physical verification';
 
   if (refreshResult.ok) {
+    const successTitle =
+      mutationType === 'verification'
+        ? 'VERIFICATION RECORDED & STATE VERIFIED'
+        : 'OPERATION CONFIRMED & STATE VERIFIED';
+
+    const successMessage =
+      mutationType === 'verification'
+        ? 'Physical verification was confirmed on the server and authoritative records were successfully refreshed.'
+        : `${mutationLabel} was confirmed on the server and authoritative records were successfully refreshed.`;
+
     return {
       mutationConfirmed: true,
       mutationType,
       refreshOk: true,
       refreshNotVerified: false,
-      title: 'OPERATION CONFIRMED & STATE VERIFIED',
-      message: `${mutationLabel} was confirmed on the server and authoritative records were successfully refreshed.`,
+      title: successTitle,
+      message: successMessage,
       isTransferStateUnverified: false,
       canRetryRefresh: false,
       partialFailure: false,
@@ -242,8 +407,12 @@ export function evaluatePostMutationRefresh(
     refreshNotVerified: true,
     title: 'Saved on server; refresh not verified',
     message: `${mutationLabel} was successfully committed and saved on the server, but reloading the updated state could not be verified (${cause}). Your changes were safely recorded on the server, but displayed records may be pending refresh.`,
-    // If transfers failed or whole refresh failed, pending state is unknown -> guard enabled
-    isTransferStateUnverified: !refreshResult.details.transfersOk || !refreshResult.ok,
+    // If transfers failed or whole refresh failed on transfer mutations, pending state is unknown -> guard enabled
+    // Physical verification does not mutate transfer state, so transfer button is not locked
+    isTransferStateUnverified:
+      mutationType === 'verification'
+        ? false
+        : !refreshResult.details.transfersOk || !refreshResult.ok,
     canRetryRefresh: true,
     partialFailure: !!refreshResult.partialFailure,
   };

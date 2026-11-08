@@ -21,9 +21,11 @@ import {
   executeAuthoritativeRefresh,
   evaluatePostMutationRefresh,
   shouldDisableInitiateTransfer,
+  fetchVerificationHistory,
   type AuthoritativeRefreshResult,
   type PostMutationFeedbackState,
   type MutationType,
+  type VerificationHistoryFetchResult,
 } from '../../utils/assetRefreshClient.ts';
 import { Panel } from '../ui/Panel.tsx';
 import { Button } from '../ui/Button.tsx';
@@ -127,6 +129,7 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
     totalPages: 1,
   });
   const [isVerificationsLoading, setIsVerificationsLoading] = useState(false);
+  const [verificationsError, setVerificationsError] = useState<string | null>(null);
   const [isRecordVerificationOpen, setIsRecordVerificationOpen] = useState(false);
 
   // Load Reference Catalogs for Edit Mode & Transfers
@@ -212,60 +215,66 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
   };
 
   const loadVerificationsPage = useCallback(
-    async (page: number) => {
-      if (previewMode) return;
-      setIsVerificationsLoading(true);
-      try {
-        const res = await fetch(`/api/assets/${assetId}/verifications?page=${page}&limit=10`, {
-          credentials: 'include',
-        });
-        if (res.ok) {
-          const json = await res.json();
-          setVerifications(json.data || []);
-          if (json.pagination) {
-            setVerificationPagination(json.pagination);
-          }
-        }
-      } catch {
-        // network failure gracefully retained
-      } finally {
-        setIsVerificationsLoading(false);
+    async (page: number): Promise<VerificationHistoryFetchResult> => {
+      if (previewMode) {
+        return { ok: true, data: [] };
       }
+      setIsVerificationsLoading(true);
+      const result = await fetchVerificationHistory(assetId, page, 10);
+      if (result.ok && result.data) {
+        setVerifications(result.data);
+        setVerificationsError(null);
+        if (result.pagination) {
+          setVerificationPagination(result.pagination);
+        }
+      } else {
+        setVerificationsError(result.error || 'Failed to load physical verification history.');
+      }
+      setIsVerificationsLoading(false);
+      return result;
     },
     [assetId, previewMode]
   );
 
   const handleVerificationSuccess = async (_created: PhysicalVerificationRecord) => {
-    // Confirmed POST on server -> execute authoritative GET refresh
-    const refreshResult = await fetchAssetData(false);
-    await loadVerificationsPage(1);
+    // Confirmed POST on server -> execute authoritative GET refresh including verifications
+    setIsRefreshing(true);
+    const refreshResult = await executeAuthoritativeRefresh(assetId, fetch, {
+      includeVerifications: true,
+      verificationsPage: 1,
+      verificationsLimit: 10,
+    });
+    setIsRefreshing(false);
 
-    if (refreshResult.ok) {
-      setPostMutationFeedback({
-        mutationConfirmed: true,
-        mutationType: 'create',
-        refreshOk: true,
-        refreshNotVerified: false,
-        title: 'VERIFICATION RECORDED & STATE VERIFIED',
-        message:
-          'Authoritative physical verification attempt, latest verification summary, and audit events were successfully refreshed.',
-        isTransferStateUnverified: false,
-        canRetryRefresh: false,
-        partialFailure: false,
-      });
-    } else {
-      setPostMutationFeedback({
-        mutationConfirmed: true,
-        mutationType: 'create',
-        refreshOk: false,
-        refreshNotVerified: true,
-        title: 'Saved on server; refresh not verified',
-        message: `The physical verification record was committed on the server, but refreshing updated records could not be verified (${refreshResult.error || 'network error'}). Please retry again.`,
-        isTransferStateUnverified: false,
-        canRetryRefresh: true,
-        partialFailure: !!refreshResult.partialFailure,
-      });
+    if (refreshResult.assetData) {
+      setAsset(refreshResult.assetData);
+      setLoadError(null);
     }
+    if (refreshResult.historyData) {
+      setRecentHistory(refreshResult.historyData.records);
+      setHistoryTotal(refreshResult.historyData.total);
+    }
+    if (refreshResult.transfersData) {
+      setTransfers(refreshResult.transfersData.records);
+      setActivePendingTransfer(refreshResult.transfersData.activePending);
+      if (refreshResult.transfersData.pagination) {
+        setTransferPagination(refreshResult.transfersData.pagination);
+      }
+    }
+    if (refreshResult.verificationsData) {
+      setVerifications(refreshResult.verificationsData.records);
+      setVerificationsError(null);
+      if (refreshResult.verificationsData.pagination) {
+        setVerificationPagination(refreshResult.verificationsData.pagination);
+      }
+    } else if (!refreshResult.details.verificationsOk) {
+      setVerificationsError(
+        `Physical verification history reload failed (HTTP ${refreshResult.details.verificationsStatus || 'error'}).`
+      );
+    }
+
+    const feedback = evaluatePostMutationRefresh('verification', refreshResult);
+    setPostMutationFeedback(feedback);
   };
 
   const handleTransferMutationSuccess = async (mutationType: MutationType = 'create') => {
@@ -280,36 +289,49 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
 
   const handleRetryRefresh = async () => {
     setIsRefreshing(true);
-    const refreshResult = await fetchAssetData(false);
+    const isVerificationRetry = postMutationFeedback?.mutationType === 'verification';
 
-    if (refreshResult.ok) {
-      setPostMutationFeedback({
-        mutationConfirmed: true,
-        mutationType: postMutationFeedback?.mutationType || 'create',
-        refreshOk: true,
-        refreshNotVerified: false,
-        title: 'OPERATION CONFIRMED & STATE VERIFIED',
-        message:
-          'Authoritative asset specifications, transfer workflow records, and audit events were successfully refreshed.',
-        isTransferStateUnverified: false,
-        canRetryRefresh: false,
-        partialFailure: false,
-      });
-      setIsTransferStateUnverified(false);
-    } else {
-      setPostMutationFeedback((prev) => ({
-        mutationConfirmed: true,
-        mutationType: prev?.mutationType || 'create',
-        refreshOk: false,
-        refreshNotVerified: true,
-        title: 'Saved on server; refresh not verified',
-        message: `The mutation remains committed on the server, but refreshing updated records could not be verified (${refreshResult.error || 'network error'}). Please retry again.`,
-        isTransferStateUnverified: !refreshResult.details.transfersOk || !refreshResult.ok,
-        canRetryRefresh: true,
-        partialFailure: !!refreshResult.partialFailure,
-      }));
-      setIsTransferStateUnverified(!refreshResult.details.transfersOk || !refreshResult.ok);
+    const refreshResult = await executeAuthoritativeRefresh(
+      assetId,
+      fetch,
+      isVerificationRetry ? { includeVerifications: true } : undefined
+    );
+
+    if (refreshResult.assetData) {
+      setAsset(refreshResult.assetData);
+      setLoadError(null);
     }
+    if (refreshResult.historyData) {
+      setRecentHistory(refreshResult.historyData.records);
+      setHistoryTotal(refreshResult.historyData.total);
+    }
+    if (refreshResult.transfersData) {
+      setTransfers(refreshResult.transfersData.records);
+      setActivePendingTransfer(refreshResult.transfersData.activePending);
+      if (refreshResult.transfersData.pagination) {
+        setTransferPagination(refreshResult.transfersData.pagination);
+      }
+    }
+    if (refreshResult.verificationsData) {
+      setVerifications(refreshResult.verificationsData.records);
+      setVerificationsError(null);
+      if (refreshResult.verificationsData.pagination) {
+        setVerificationPagination(refreshResult.verificationsData.pagination);
+      }
+    } else if (isVerificationRetry && !refreshResult.details.verificationsOk) {
+      setVerificationsError(
+        `Physical verification history reload failed (HTTP ${refreshResult.details.verificationsStatus || 'error'}).`
+      );
+    }
+
+    setIsRefreshing(false);
+
+    const feedback = evaluatePostMutationRefresh(
+      postMutationFeedback?.mutationType || 'create',
+      refreshResult
+    );
+    setPostMutationFeedback(feedback);
+    setIsTransferStateUnverified(feedback.isTransferStateUnverified);
   };
 
   const handleReadOnlyRefresh = async () => {
@@ -1309,6 +1331,8 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
               totalPages={verificationPagination.totalPages}
               isLoading={isVerificationsLoading}
               onPageChange={loadVerificationsPage}
+              errorMessage={verificationsError}
+              onRetry={() => loadVerificationsPage(verificationPagination.page)}
             />
           </div>
         </div>

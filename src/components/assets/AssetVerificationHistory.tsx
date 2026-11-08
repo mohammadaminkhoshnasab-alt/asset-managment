@@ -25,6 +25,8 @@ interface AssetVerificationHistoryProps {
   totalPages: number;
   isLoading: boolean;
   onPageChange: (newPage: number) => void;
+  errorMessage?: string | null;
+  onRetry?: () => void;
 }
 
 export function getOutcomeBadge(outcome: VerificationOutcomeEnum) {
@@ -82,12 +84,41 @@ export const AssetVerificationHistory: React.FC<AssetVerificationHistoryProps> =
   totalPages,
   isLoading,
   onPageChange,
+  errorMessage,
+  onRetry,
 }) => {
   if (isLoading) {
     return (
       <div className="py-8 flex flex-col items-center justify-center text-zinc-400 text-xs font-mono">
         <Clock className="w-5 h-5 animate-spin text-emerald-400 mb-2" />
         Loading verification timeline...
+      </div>
+    );
+  }
+
+  if (errorMessage && verifications.length === 0) {
+    return (
+      <div className="py-6 px-4 border border-red-800/60 rounded-md bg-red-950/20 text-center space-y-2">
+        <AlertTriangle className="w-7 h-7 text-red-400 mx-auto" />
+        <div className="text-xs text-red-200 font-mono font-semibold">
+          Failed to load physical verification history
+        </div>
+        <p className="text-[11px] text-zinc-400 font-mono max-w-md mx-auto">
+          {errorMessage}
+        </p>
+        {onRetry && (
+          <div className="pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onRetry}
+              className="text-xs"
+            >
+              Retry Loading History
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
@@ -108,6 +139,30 @@ export const AssetVerificationHistory: React.FC<AssetVerificationHistoryProps> =
 
   return (
     <div className="space-y-3">
+      {errorMessage && (
+        <div
+          role="alert"
+          className="p-3 bg-amber-950/50 border border-amber-700/60 rounded-md flex items-center justify-between text-xs text-amber-200 font-mono"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              Could not refresh latest records ({errorMessage}). Preserving last trusted data ({verifications.length} record{verifications.length !== 1 ? 's' : ''}).
+            </span>
+          </div>
+          {onRetry && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onRetry}
+              className="text-xs shrink-0 ml-3 py-0.5 px-2 h-auto"
+            >
+              Retry
+            </Button>
+          )}
+        </div>
+      )}
       <div className="overflow-x-auto border border-zinc-800 rounded-md bg-zinc-950/50">
         <table className="w-full text-left text-xs text-zinc-300">
           <thead className="bg-zinc-900/80 text-[11px] font-mono text-zinc-400 uppercase tracking-wider border-b border-zinc-800">

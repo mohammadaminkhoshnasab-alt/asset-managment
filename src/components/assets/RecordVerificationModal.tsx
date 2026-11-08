@@ -16,11 +16,13 @@ import {
   Lock,
   X,
   CheckCircle2,
+  Check,
   HelpCircle,
   Clock,
   MapPin,
   User,
   Info,
+  RotateCcw,
 } from 'lucide-react';
 
 interface RecordVerificationModalProps {
@@ -86,6 +88,13 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [networkUncertainWarning, setNetworkUncertainWarning] = useState<boolean>(false);
+  const [isBlindResubmitBlocked, setIsBlindResubmitBlocked] = useState<boolean>(false);
+  const [isCheckingHistory, setIsCheckingHistory] = useState<boolean>(false);
+  const [reconciliationStatus, setReconciliationStatus] = useState<{
+    type: 'found' | 'not_found' | 'error';
+    message: string;
+    record?: PhysicalVerificationRecord;
+  } | null>(null);
 
   // Synchronize day within allowed max days if month or year changes
   useEffect(() => {
@@ -129,14 +138,69 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
     return Object.keys(errors).length === 0;
   };
 
+  const handleCheckVerificationHistory = async () => {
+    setIsCheckingHistory(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch(`/api/assets/${asset.id}/verifications?page=1&limit=10`, {
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        setReconciliationStatus({
+          type: 'error',
+          message: `Server returned HTTP ${res.status} when checking verification history. Blind resubmission remains locked.`,
+        });
+        return;
+      }
+      const json = await res.json().catch(() => ({}));
+      const records: PhysicalVerificationRecord[] = json.data || [];
+
+      // Find matching record submitted around this inspection target
+      const matched = records.find((r) => {
+        const matchOutcome = r.outcome === outcome;
+        const matchYear = r.verifiedYear === year;
+        const matchMonth = r.verifiedMonth === month;
+        const matchDay = datePrecision === 'DAY' ? r.verifiedDay === day : r.verifiedDay === null;
+        return matchOutcome && matchYear && matchMonth && matchDay;
+      });
+
+      if (matched) {
+        setReconciliationStatus({
+          type: 'found',
+          message: `A matching physical verification was found recorded on the server (${matched.outcome} on ${matched.verifiedYearMonth || matched.verifiedYear}). The record was committed successfully.`,
+          record: matched,
+        });
+      } else {
+        setReconciliationStatus({
+          type: 'not_found',
+          message: `Checked server at ${new Date().toLocaleTimeString()}: No matching verification record was found on the server. Your draft is preserved below and you may now submit.`,
+        });
+        setIsBlindResubmitBlocked(false);
+      }
+    } catch {
+      setReconciliationStatus({
+        type: 'error',
+        message: 'Network connection failed while checking verification history. Blind resubmission remains locked for safety.',
+      });
+    } finally {
+      setIsCheckingHistory(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-    setNetworkUncertainWarning(false);
 
     if (previewMode) {
       setErrorMessage(
         'Preview Inspection Mode is active. Mutating verification records is disabled.'
+      );
+      return;
+    }
+
+    if (isBlindResubmitBlocked) {
+      setErrorMessage(
+        'Blind re-submission is locked following an uncertain transmission. Please click "Check Verification History" to reconcile state before submitting again.'
       );
       return;
     }
@@ -172,6 +236,8 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
 
       if (response.status === 201 && data.status === 'ok') {
         // Confirmed save on server
+        setIsBlindResubmitBlocked(false);
+        setNetworkUncertainWarning(false);
         await onVerificationSuccess(data.data);
         onClose();
       } else if (response.status === 400) {
@@ -190,10 +256,12 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
       }
     } catch {
       // Network interrupted during transmission: outcome is uncertain.
-      // Retain draft and inform user truthfully without allowing blind resubmission.
+      // Retain draft and inform user truthfully; block blind resubmission.
       setNetworkUncertainWarning(true);
+      setIsBlindResubmitBlocked(true);
+      setReconciliationStatus(null);
       setErrorMessage(
-        'Network connection interrupted during save. The verification record may or may not have reached the server. Please check verification history before re-attempting.'
+        'Network connection interrupted during save. The verification record may or may not have reached the server. Blind re-submission is locked to prevent duplicates. Please check verification history before re-attempting.'
       );
       onUncertainNetworkState(payload);
     } finally {
@@ -290,20 +358,88 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
             </p>
           </div>
 
-          {/* Uncertain Network Warning Banner */}
-          {networkUncertainWarning && (
+          {/* Reconciliation Status: Found existing committed record */}
+          {reconciliationStatus?.type === 'found' && (
             <div
               role="alert"
-              className="p-3 bg-amber-950/60 border border-amber-600/80 rounded-md text-amber-200 text-xs space-y-1.5"
+              className="p-3 bg-emerald-950/70 border border-emerald-600/80 rounded-md text-emerald-200 text-xs space-y-2"
+            >
+              <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-emerald-300">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                Committed Record Verified on Server
+              </div>
+              <p className="leading-relaxed font-mono text-[11px]">
+                {reconciliationStatus.message}
+              </p>
+              <div className="pt-1">
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={async () => {
+                    if (reconciliationStatus.record) {
+                      await onVerificationSuccess(reconciliationStatus.record);
+                    }
+                    onClose();
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono"
+                >
+                  Accept & View Verified Record
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Reconciliation Status: Confirmed not found -> cleared to submit */}
+          {reconciliationStatus?.type === 'not_found' && (
+            <div
+              role="status"
+              className="p-3 bg-blue-950/60 border border-blue-600/70 rounded-md text-blue-200 text-xs space-y-1 font-mono text-[11px]"
+            >
+              <div className="flex items-center gap-1.5 font-bold text-blue-300">
+                <Check className="w-4 h-4 text-blue-400" />
+                History Checked — Ready for Submission
+              </div>
+              <p className="leading-relaxed">{reconciliationStatus.message}</p>
+            </div>
+          )}
+
+          {/* Uncertain Network Warning Banner with Safe Reconciliation Action */}
+          {networkUncertainWarning && reconciliationStatus?.type !== 'found' && (
+            <div
+              role="alert"
+              className="p-3.5 bg-amber-950/60 border border-amber-600/80 rounded-md text-amber-200 text-xs space-y-2"
             >
               <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-amber-300">
-                <AlertTriangle className="w-4 h-4 text-amber-400" />
-                Transmission Outcome Uncertain
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                Transmission Outcome Uncertain — Re-submission Locked
               </div>
-              <p className="leading-relaxed">
-                A network glitch occurred during submission. Your draft is preserved below. Before resubmitting,
-                please verify whether the record was committed on the server.
+              <p className="leading-relaxed font-mono text-[11px]">
+                A network glitch occurred during save. Your draft is preserved below. Blind duplicate re-submission
+                is locked to prevent phantom records. Please check the server&apos;s authoritative history before retrying.
               </p>
+              <div className="pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCheckVerificationHistory}
+                  disabled={isCheckingHistory || isSubmitting}
+                  className="flex items-center gap-1.5 text-xs text-amber-200 border-amber-600/70 hover:bg-amber-900/40 font-mono"
+                >
+                  {isCheckingHistory ? (
+                    <>
+                      <Clock className="w-3.5 h-3.5 animate-spin" />
+                      Checking Verification History...
+                    </>
+                  ) : (
+                    <>
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      Check Verification History
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           )}
 
@@ -314,7 +450,7 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
               className="p-3 bg-red-950/60 border border-red-700/80 rounded-md text-red-200 text-xs flex items-start gap-2"
             >
               <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              <div className="leading-relaxed">{errorMessage}</div>
+              <div className="leading-relaxed font-mono text-xs">{errorMessage}</div>
             </div>
           )}
 
@@ -563,12 +699,18 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
 
           {/* Action Buttons */}
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-800">
+            {isBlindResubmitBlocked && (
+              <span className="text-[11px] font-mono text-amber-400 mr-auto flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 shrink-0" />
+                Re-submission locked pending reconciliation
+              </span>
+            )}
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={onClose}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isCheckingHistory}
             >
               Cancel
             </Button>
@@ -576,13 +718,18 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
               type="submit"
               variant="primary"
               size="sm"
-              disabled={isSubmitting || previewMode}
+              disabled={isSubmitting || previewMode || isBlindResubmitBlocked || isCheckingHistory}
               className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white"
             >
               {isSubmitting ? (
                 <>
                   <Clock className="w-4 h-4 animate-spin" />
                   Recording Verification...
+                </>
+              ) : isCheckingHistory ? (
+                <>
+                  <Clock className="w-4 h-4 animate-spin" />
+                  Checking History...
                 </>
               ) : (
                 <>
