@@ -17,6 +17,14 @@ import {
   INITIAL_LOOKUP_STATE,
   type LookupCatalogsState,
 } from '../../utils/lookupClient.ts';
+import {
+  executeAuthoritativeRefresh,
+  evaluatePostMutationRefresh,
+  shouldDisableInitiateTransfer,
+  type AuthoritativeRefreshResult,
+  type PostMutationFeedbackState,
+  type MutationType,
+} from '../../utils/assetRefreshClient.ts';
 import { Panel } from '../ui/Panel.tsx';
 import { Button } from '../ui/Button.tsx';
 import { Input } from '../ui/Input.tsx';
@@ -94,7 +102,9 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
     total: 0,
     totalPages: 1,
   });
-  const [postMutationRefreshWarning, setPostMutationRefreshWarning] = useState<string | null>(null);
+  const [postMutationFeedback, setPostMutationFeedback] = useState<PostMutationFeedbackState | null>(null);
+  const [isTransferStateUnverified, setIsTransferStateUnverified] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitiateTransferOpen, setIsInitiateTransferOpen] = useState(false);
   const [completingTransfer, setCompletingTransfer] = useState<AssetTransferRecord | null>(null);
   const [cancellingTransfer, setCancellingTransfer] = useState<AssetTransferRecord | null>(null);
@@ -111,71 +121,55 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
   }, []);
 
   // Fetch Authoritative Asset Details, Recent History, and Transfers
-  const fetchAssetData = useCallback(async () => {
-    if (previewMode) {
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    setLoadError(null);
-
-    try {
-      const [assetRes, historyRes, transferRes] = await Promise.all([
-        fetch(`/api/assets/${assetId}`, { credentials: 'include' }),
-        fetch(`/api/assets/${assetId}/history?page=1&limit=5`, { credentials: 'include' }),
-        fetch(`/api/assets/${assetId}/transfers?page=1&limit=10`, { credentials: 'include' }),
-      ]);
-
-      if (assetRes.ok) {
-        const assetJson = await assetRes.json();
-        setAsset(assetJson.data);
-      } else if (assetRes.status === 404) {
-        setLoadError(`Asset with UUID '${assetId}' was not found in the database registry.`);
+  const fetchAssetData = useCallback(
+    async (isInitialLoad = false): Promise<AuthoritativeRefreshResult> => {
+      if (previewMode) {
         setIsLoading(false);
-        return;
-      } else if (assetRes.status === 400) {
-        setLoadError("Invalid asset identifier format. Expected standard RFC 4122 UUID.");
-        setIsLoading(false);
-        return;
-      } else if (assetRes.status === 401) {
-        setLoadError("Administrative session required or expired (401 Unauthorized). Please sign in.");
-        setIsLoading(false);
-        return;
+        return {
+          ok: true,
+          details: { assetOk: true, historyOk: true, transfersOk: true },
+        };
+      }
+
+      if (isInitialLoad) {
+        setIsLoading(true);
+        setLoadError(null);
       } else {
-        setLoadError(`Failed to load asset from server (Status: ${assetRes.status}).`);
-        setIsLoading(false);
-        return;
+        setIsRefreshing(true);
       }
 
-      if (historyRes.ok) {
-        const historyJson = await historyRes.json();
-        setRecentHistory(historyJson.data || []);
-        if (historyJson.pagination) {
-          setHistoryTotal(historyJson.pagination.total);
+      const result = await executeAuthoritativeRefresh(assetId);
+
+      if (result.assetData) {
+        setAsset(result.assetData);
+        setLoadError(null);
+      }
+
+      if (result.historyData) {
+        setRecentHistory(result.historyData.records);
+        setHistoryTotal(result.historyData.total);
+      }
+
+      if (result.transfersData) {
+        setTransfers(result.transfersData.records);
+        setActivePendingTransfer(result.transfersData.activePending);
+        if (result.transfersData.pagination) {
+          setTransferPagination(result.transfersData.pagination);
         }
       }
 
-      if (transferRes.ok) {
-        const transferJson = await transferRes.json();
-        setTransfers(transferJson.data || []);
-        if (transferJson.activePending !== undefined) {
-          setActivePendingTransfer(transferJson.activePending);
-        } else {
-          setActivePendingTransfer(
-            (transferJson.data || []).find((t: any) => t.status === 'PENDING') || null
-          );
-        }
-        if (transferJson.pagination) {
-          setTransferPagination(transferJson.pagination);
-        }
+      // If initial load failed to obtain asset data, display error state
+      if (isInitialLoad && !result.assetData) {
+        setLoadError(result.error || 'Failed to load asset from server.');
       }
-    } catch {
-      setLoadError("Network connection error. Server or PostgreSQL database is unreachable.");
-    } finally {
+
       setIsLoading(false);
-    }
-  }, [assetId, previewMode]);
+      setIsRefreshing(false);
+
+      return result;
+    },
+    [assetId, previewMode]
+  );
 
   const loadTransfersPage = async (page: number) => {
     try {
@@ -197,19 +191,72 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
     }
   };
 
-  const handleTransferMutationSuccess = async () => {
-    setPostMutationRefreshWarning(null);
-    try {
-      await fetchAssetData();
-    } catch {
-      setPostMutationRefreshWarning(
-        'The transfer mutation was submitted successfully on the server, but reloading the updated asset state encountered a network error. Your changes were safely recorded.'
-      );
+  const handleTransferMutationSuccess = async (mutationType: MutationType = 'create') => {
+    // 1. Issue strictly read-only GET refresh
+    const refreshResult = await fetchAssetData(false);
+
+    // 2. Truthfully evaluate post-mutation feedback state
+    const feedback = evaluatePostMutationRefresh(mutationType, refreshResult);
+    setPostMutationFeedback(feedback);
+    setIsTransferStateUnverified(feedback.isTransferStateUnverified);
+  };
+
+  const handleRetryRefresh = async () => {
+    setIsRefreshing(true);
+    const refreshResult = await fetchAssetData(false);
+
+    if (refreshResult.ok) {
+      setPostMutationFeedback({
+        mutationConfirmed: true,
+        mutationType: postMutationFeedback?.mutationType || 'create',
+        refreshOk: true,
+        refreshNotVerified: false,
+        title: 'OPERATION CONFIRMED & STATE VERIFIED',
+        message:
+          'Authoritative asset specifications, transfer workflow records, and audit events were successfully refreshed.',
+        isTransferStateUnverified: false,
+        canRetryRefresh: false,
+        partialFailure: false,
+      });
+      setIsTransferStateUnverified(false);
+    } else {
+      setPostMutationFeedback((prev) => ({
+        mutationConfirmed: true,
+        mutationType: prev?.mutationType || 'create',
+        refreshOk: false,
+        refreshNotVerified: true,
+        title: 'Saved on server; refresh not verified',
+        message: `The mutation remains committed on the server, but refreshing updated records could not be verified (${refreshResult.error || 'network error'}). Please retry again.`,
+        isTransferStateUnverified: !refreshResult.details.transfersOk || !refreshResult.ok,
+        canRetryRefresh: true,
+        partialFailure: !!refreshResult.partialFailure,
+      }));
+      setIsTransferStateUnverified(!refreshResult.details.transfersOk || !refreshResult.ok);
     }
   };
 
+  const handleReadOnlyRefresh = async () => {
+    const refreshResult = await fetchAssetData(false);
+    if (refreshResult.ok) {
+      setIsTransferStateUnverified(false);
+      if (postMutationFeedback?.refreshNotVerified) {
+        setPostMutationFeedback({
+          mutationConfirmed: true,
+          mutationType: postMutationFeedback.mutationType,
+          refreshOk: true,
+          refreshNotVerified: false,
+          title: 'OPERATION CONFIRMED & STATE VERIFIED',
+          message: 'Authoritative state successfully verified.',
+          isTransferStateUnverified: false,
+          canRetryRefresh: false,
+        });
+      }
+    }
+    return refreshResult;
+  };
+
   useEffect(() => {
-    fetchAssetData();
+    fetchAssetData(true);
     loadCatalogs();
   }, [fetchAssetData, loadCatalogs]);
 
@@ -507,7 +554,7 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
               <Button
                 variant="secondary"
                 size="md"
-                onClick={fetchAssetData}
+                onClick={() => fetchAssetData(true)}
                 leftIcon={<RotateCcw className="w-4 h-4" />}
               >
                 Retry Fetch
@@ -621,23 +668,62 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
         </div>
       )}
 
-      {postMutationRefreshWarning && (
-        <div className="p-3.5 rounded bg-amber-950/60 border border-amber-700/70 text-amber-200 text-xs font-mono flex items-start justify-between gap-3 animate-fadeIn">
-          <div className="flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <div>
-              <strong className="block font-semibold">Post-Mutation Refresh Notice:</strong>
-              <span>{postMutationRefreshWarning}</span>
+      {postMutationFeedback && (
+        <div
+          role="alert"
+          className={`p-4 rounded-md border text-xs font-mono space-y-2.5 animate-fadeIn ${
+            postMutationFeedback.refreshNotVerified
+              ? 'bg-amber-950/50 border-amber-700/80 text-amber-200'
+              : 'bg-emerald-950/40 border-emerald-700/60 text-emerald-200'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              {postMutationFeedback.refreshNotVerified ? (
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              )}
+              <span className="font-bold uppercase tracking-wider text-sm">
+                {postMutationFeedback.title}
+              </span>
+              {postMutationFeedback.refreshNotVerified && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-900/60 border border-amber-600/60 text-amber-300">
+                  MUTATION SAVED ON SERVER
+                </span>
+              )}
             </div>
+
+            {postMutationFeedback.canRetryRefresh && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRetryRefresh}
+                isLoading={isRefreshing}
+                disabled={isRefreshing}
+                leftIcon={<RotateCcw className="w-3.5 h-3.5 text-amber-400" />}
+              >
+                Retry Refresh
+              </Button>
+            )}
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchAssetData}
-            leftIcon={<RotateCcw className="w-3.5 h-3.5 text-amber-400" />}
-          >
-            Reload State
-          </Button>
+
+          <p className="leading-relaxed text-slate-300">
+            {postMutationFeedback.message}
+          </p>
+
+          {postMutationFeedback.refreshNotVerified && (
+            <div className="pt-1.5 border-t border-amber-800/40 text-[11px] text-amber-400/90 space-y-1">
+              <p>
+                • <strong>Read-Only Refresh:</strong> Retrying only reads server records via GET and will never re-execute or duplicate the transfer mutation.
+              </p>
+              {isTransferStateUnverified && (
+                <p>
+                  • <strong>Safety Guard:</strong> Further transfer actions are temporarily held in an unavailable/retry state until authoritative server state is verified.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -898,12 +984,25 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
               }}
               leftIcon={<ArrowRightLeft className="w-3.5 h-3.5" />}
               disabled={
-                previewMode ||
-                !!activePendingTransfer ||
-                !!transfers.find((t) => t.status === 'PENDING')
+                shouldDisableInitiateTransfer({
+                  previewMode,
+                  activePendingTransfer,
+                  transfers,
+                  isTransferStateUnverified,
+                  isRefreshing,
+                }).disabled
+              }
+              title={
+                shouldDisableInitiateTransfer({
+                  previewMode,
+                  activePendingTransfer,
+                  transfers,
+                  isTransferStateUnverified,
+                  isRefreshing,
+                }).reason
               }
             >
-              Initiate Transfer
+              {isTransferStateUnverified ? 'Initiate Transfer (Unverified)' : 'Initiate Transfer'}
             </Button>
           </div>
         }
@@ -989,12 +1088,25 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
             }}
             leftIcon={<ArrowRightLeft className="w-3.5 h-3.5" />}
             disabled={
-              previewMode ||
-              !!activePendingTransfer ||
-              !!transfers.find((t) => t.status === 'PENDING')
+              shouldDisableInitiateTransfer({
+                previewMode,
+                activePendingTransfer,
+                transfers,
+                isTransferStateUnverified,
+                isRefreshing,
+              }).disabled
+            }
+            title={
+              shouldDisableInitiateTransfer({
+                previewMode,
+                activePendingTransfer,
+                transfers,
+                isTransferStateUnverified,
+                isRefreshing,
+              }).reason
             }
           >
-            Initiate Transfer
+            {isTransferStateUnverified ? 'Initiate Transfer (Unverified)' : 'Initiate Transfer'}
           </Button>
         }
       >
@@ -1174,7 +1286,8 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
           catalogs={catalogs}
           csrfToken={csrfToken}
           previewMode={previewMode}
-          onTransferCreated={handleTransferMutationSuccess}
+          onTransferCreated={() => handleTransferMutationSuccess('create')}
+          onCheckState={handleReadOnlyRefresh}
         />
       )}
 
@@ -1185,7 +1298,8 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
           transfer={completingTransfer}
           assetModel={asset.model}
           csrfToken={csrfToken}
-          onCompleted={handleTransferMutationSuccess}
+          onCompleted={() => handleTransferMutationSuccess('complete')}
+          onCheckState={handleReadOnlyRefresh}
         />
       )}
 
@@ -1196,7 +1310,8 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
           transfer={cancellingTransfer}
           assetModel={asset.model}
           csrfToken={csrfToken}
-          onCancelled={handleTransferMutationSuccess}
+          onCancelled={() => handleTransferMutationSuccess('cancel')}
+          onCheckState={handleReadOnlyRefresh}
         />
       )}
     </div>

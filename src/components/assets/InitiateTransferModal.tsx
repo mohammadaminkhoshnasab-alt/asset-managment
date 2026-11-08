@@ -26,6 +26,7 @@ interface InitiateTransferModalProps {
   csrfToken: string | null;
   previewMode: boolean;
   onTransferCreated: () => void;
+  onCheckState?: () => Promise<any>;
 }
 
 export const InitiateTransferModal: React.FC<InitiateTransferModalProps> = ({
@@ -36,6 +37,7 @@ export const InitiateTransferModal: React.FC<InitiateTransferModalProps> = ({
   csrfToken,
   previewMode,
   onTransferCreated,
+  onCheckState,
 }) => {
   // Dimension Selection Flags
   const [changeAcOwner, setChangeAcOwner] = useState(false);
@@ -210,13 +212,17 @@ export const InitiateTransferModal: React.FC<InitiateTransferModalProps> = ({
                   <div className="pt-1">
                     <button
                       type="button"
-                      onClick={() => {
-                        onTransferCreated();
+                      onClick={async () => {
+                        if (onCheckState) {
+                          await onCheckState();
+                        } else {
+                          onTransferCreated();
+                        }
                       }}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold bg-[#181d28] border border-amber-600/60 text-amber-300 hover:text-white hover:bg-[#202736] cursor-pointer"
                     >
                       <RefreshCw className="w-3 h-3 text-amber-400" />
-                      Reload Transfer State
+                      Check Current Transfer State
                     </button>
                   </div>
                 )}

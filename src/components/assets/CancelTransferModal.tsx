@@ -16,6 +16,7 @@ interface CancelTransferModalProps {
   assetModel: string;
   csrfToken: string | null;
   onCancelled: () => void;
+  onCheckState?: () => Promise<any>;
 }
 
 export const CancelTransferModal: React.FC<CancelTransferModalProps> = ({
@@ -25,6 +26,7 @@ export const CancelTransferModal: React.FC<CancelTransferModalProps> = ({
   assetModel,
   csrfToken,
   onCancelled,
+  onCheckState,
 }) => {
   const [cancelNotes, setCancelNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -149,13 +151,17 @@ export const CancelTransferModal: React.FC<CancelTransferModalProps> = ({
                   <div className="pt-1">
                     <button
                       type="button"
-                      onClick={() => {
-                        onCancelled();
+                      onClick={async () => {
+                        if (onCheckState) {
+                          await onCheckState();
+                        } else {
+                          onCancelled();
+                        }
                       }}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold bg-[#181d28] border border-amber-600/60 text-amber-300 hover:text-white hover:bg-[#202736] cursor-pointer"
                     >
                       <RefreshCw className="w-3 h-3 text-amber-400" />
-                      Reload Transfer State
+                      Check Current Transfer State
                     </button>
                   </div>
                 )}

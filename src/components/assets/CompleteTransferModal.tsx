@@ -19,6 +19,7 @@ interface CompleteTransferModalProps {
   assetModel: string;
   csrfToken: string | null;
   onCompleted: () => void;
+  onCheckState?: () => Promise<any>;
 }
 
 export const CompleteTransferModal: React.FC<CompleteTransferModalProps> = ({
@@ -28,6 +29,7 @@ export const CompleteTransferModal: React.FC<CompleteTransferModalProps> = ({
   assetModel,
   csrfToken,
   onCompleted,
+  onCheckState,
 }) => {
   const [eformNumber, setEformNumber] = useState(transfer.eformNumber || '');
   const [completionNotes, setCompletionNotes] = useState('');
@@ -172,13 +174,17 @@ export const CompleteTransferModal: React.FC<CompleteTransferModalProps> = ({
                   <div className="pt-1">
                     <button
                       type="button"
-                      onClick={() => {
-                        onCompleted();
+                      onClick={async () => {
+                        if (onCheckState) {
+                          await onCheckState();
+                        } else {
+                          onCompleted();
+                        }
                       }}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold bg-[#181d28] border border-amber-600/60 text-amber-300 hover:text-white hover:bg-[#202736] cursor-pointer"
                     >
                       <RefreshCw className="w-3 h-3 text-amber-400" />
-                      Reload Transfer State
+                      Check Current Transfer State
                     </button>
                   </div>
                 )}
