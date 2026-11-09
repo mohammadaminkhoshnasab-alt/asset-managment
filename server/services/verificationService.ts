@@ -312,4 +312,53 @@ export const verificationService = {
       totalPages: Math.ceil(total / limit) || 1,
     };
   },
+
+  /**
+   * Evaluates chronological precedence and mixed-precision ambiguity (Policy P11-D01)
+   * across ALL qualifying (isSuccessful=true) records for an asset on the server.
+   * Guarantees bounded response presentation without unbounded client-side pagination loading.
+   */
+  async getVerificationEvaluation(assetId: string) {
+    const assetExists = await prisma.asset.findUnique({
+      where: { id: assetId },
+      select: { id: true },
+    });
+
+    if (!assetExists) {
+      throw new AssetNotFoundError(assetId);
+    }
+
+    const qualifyingRecords = await prisma.physicalVerification.findMany({
+      where: {
+        assetId,
+        isSuccessful: true,
+      },
+      orderBy: [
+        { verifiedYear: 'desc' },
+        { verifiedMonth: 'desc' },
+        { createdAt: 'desc' },
+      ],
+      select: {
+        id: true,
+        outcome: true,
+        datePrecision: true,
+        verifiedYear: true,
+        verifiedMonth: true,
+        verifiedDay: true,
+        verifiedDate: true,
+        verifiedYearMonth: true,
+        verifiedBy: true,
+        createdAt: true,
+        notes: true,
+      },
+    });
+
+    const evaluation = evaluateVerificationChronology(qualifyingRecords);
+
+    return {
+      ...evaluation,
+      totalQualifyingRecords: qualifyingRecords.length,
+      evaluatedAt: new Date().toISOString(),
+    };
+  },
 };

@@ -33,6 +33,7 @@ interface RecordVerificationModalProps {
   previewMode: boolean;
   onVerificationSuccess: (created: PhysicalVerificationRecord) => Promise<void>;
   onUncertainNetworkState: (draft: CreateVerificationPayload) => void;
+  onInspectHistoryReadOnly?: () => Promise<void>;
 }
 
 const MONTH_NAMES = [
@@ -68,6 +69,7 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
   previewMode,
   onVerificationSuccess,
   onUncertainNetworkState,
+  onInspectHistoryReadOnly,
 }) => {
   const currentDate = new Date();
   const currentYear = currentDate.getFullYear();
@@ -157,11 +159,33 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
           type: 'error',
           title: 'Incomplete / Failed Read',
           message: `Server returned HTTP ${res.status} when checking verification history.`,
-          details: 'Unable to verify server history. Outcome remains UNVERIFIED. Blind resubmission remains locked.',
+          details: 'Unable to verify server history. Authoritative state remains UNVERIFIED. Re-submission remains locked until history is successfully verified.',
         });
         return;
       }
-      const json = await res.json().catch(() => ({}));
+      let json: any;
+      try {
+        json = await res.json();
+      } catch {
+        setReconciliationStatus({
+          type: 'error',
+          title: 'Malformed Read Response',
+          message: 'Server returned non-JSON or malformed data when checking verification history.',
+          details: 'Authoritative server state could not be parsed. Outcome remains UNVERIFIED. Re-submission remains locked.',
+        });
+        return;
+      }
+
+      if (!json || json.status !== 'ok') {
+        setReconciliationStatus({
+          type: 'error',
+          title: 'Unsuccessful Read Response',
+          message: json?.error || `Server responded with status '${json?.status}'.`,
+          details: 'Authoritative server state could not be confirmed. Outcome remains UNVERIFIED. Re-submission remains locked.',
+        });
+        return;
+      }
+
       const records: PhysicalVerificationRecord[] = json.data || [];
       const totalRecords = json.pagination?.total ?? records.length;
       const inspectedAt = new Date().toLocaleTimeString();
@@ -179,7 +203,7 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
         setReconciliationStatus({
           type: 'possible_match',
           title: 'POSSIBLE MATCH FOUND (Non-Definitive)',
-          message: `Inspected Page 1 (10 of ${totalRecords} total records) at ${inspectedAt}. Found a verification record with matching date and outcome (${matched.outcome} on ${matched.verifiedYearMonth || matched.verifiedYear}, ID: ${matched.id.slice(0, 8)}...).`,
+          message: `Inspected Page 1 (${records.length} of ${totalRecords} total records) at ${inspectedAt}. Found a verification record with matching date and outcome (${matched.outcome} on ${matched.verifiedYearMonth || matched.verifiedYear}, ID: ${matched.id.slice(0, 8)}...).`,
           details: 'Notice: Without a per-request idempotency contract, this potential match cannot definitively prove whether your recent POST committed or this is an existing observation. Server outcome remains UNVERIFIED. Review the record or acknowledge duplicate risk before retrying.',
           inspectedCount: records.length,
           totalRecords,
@@ -202,7 +226,7 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
         type: 'error',
         title: 'Network Read Error',
         message: 'Network connection failed while checking verification history.',
-        details: 'Server could not be reached. State remains UNVERIFIED. Blind resubmission remains locked.',
+        details: 'Server could not be reached. State remains UNVERIFIED. Re-submission remains locked until history is successfully verified.',
       });
     } finally {
       setIsCheckingHistory(false);
@@ -220,11 +244,19 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
       return;
     }
 
-    if (isBlindResubmitBlocked && !duplicateRiskAcknowledged) {
-      setErrorMessage(
-        'Blind re-submission is locked following an uncertain transmission. Please check verification history and explicitly acknowledge duplicate-record risk before submitting again.'
-      );
-      return;
+    if (isBlindResubmitBlocked) {
+      if (!reconciliationStatus || reconciliationStatus.type === 'error') {
+        setErrorMessage(
+          'Re-submission is locked. Authoritative server history must be successfully checked before retry is permitted.'
+        );
+        return;
+      }
+      if (!duplicateRiskAcknowledged) {
+        setErrorMessage(
+          'Blind re-submission is locked following an uncertain transmission. Please check verification history and explicitly acknowledge duplicate-record risk before submitting again.'
+        );
+        return;
+      }
     }
 
     if (!validateClientSide()) {
@@ -407,14 +439,14 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
                     variant="outline"
                     size="sm"
                     onClick={async () => {
-                      if (reconciliationStatus.matchedRecord) {
-                        await onVerificationSuccess(reconciliationStatus.matchedRecord);
+                      if (onInspectHistoryReadOnly) {
+                        await onInspectHistoryReadOnly();
                       }
                       onClose();
                     }}
                     className="text-xs font-mono text-zinc-300 border-zinc-700 hover:bg-zinc-800"
                   >
-                    Accept & View Possible Match
+                    Close & Inspect History (Read-Only)
                   </Button>
                 )}
               </div>
@@ -466,7 +498,7 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
           {reconciliationStatus?.type === 'error' && (
             <div
               role="alert"
-              className="p-3 bg-red-950/60 border border-red-700/80 rounded-md text-red-200 text-xs space-y-1.5"
+              className="p-3.5 bg-red-950/60 border border-red-700/80 rounded-md text-red-200 text-xs space-y-2 font-mono text-[11px]"
             >
               <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-red-300">
                 <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
@@ -476,21 +508,13 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
                 {reconciliationStatus.message}
               </p>
               {reconciliationStatus.details && (
-                <p className="text-[10px] text-zinc-400 font-mono">
+                <p className="text-[10px] text-zinc-400 font-mono bg-zinc-900/60 p-2 rounded border border-zinc-800">
                   {reconciliationStatus.details}
                 </p>
               )}
-              <label className="flex items-start gap-2 pt-2 border-t border-red-800/50 cursor-pointer text-red-200">
-                <input
-                  type="checkbox"
-                  checked={duplicateRiskAcknowledged}
-                  onChange={(e) => setDuplicateRiskAcknowledged(e.target.checked)}
-                  className="mt-0.5 rounded border-red-600 bg-zinc-900 text-red-500 focus:ring-red-500"
-                />
-                <span className="text-[11px] font-mono leading-tight">
-                  I understand that history read failed and resubmitting carries a risk of creating a duplicate record.
-                </span>
-              </label>
+              <div className="p-2 bg-amber-950/40 border border-amber-800/60 rounded text-[10px] text-amber-300">
+                🔒 Re-submission is locked: A failed or incomplete read cannot verify authoritative server state. Manual retry is disabled until a successful history check is completed.
+              </div>
             </div>
           )}
 
@@ -789,18 +813,27 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
 
           {/* Action Buttons */}
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-800">
-            {isBlindResubmitBlocked && !duplicateRiskAcknowledged && (
-              <span className="text-[11px] font-mono text-amber-400 mr-auto flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 shrink-0" />
-                Re-submission locked pending duplicate risk acknowledgment
-              </span>
-            )}
-            {isBlindResubmitBlocked && duplicateRiskAcknowledged && (
-              <span className="text-[11px] font-mono text-blue-400 mr-auto flex items-center gap-1.5">
-                <Info className="w-3.5 h-3.5 shrink-0" />
-                Duplicate risk acknowledged by operator
-              </span>
-            )}
+            {isBlindResubmitBlocked &&
+              (!duplicateRiskAcknowledged ||
+                !reconciliationStatus ||
+                reconciliationStatus.type === 'error') && (
+                <span className="text-[11px] font-mono text-amber-400 mr-auto flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 shrink-0" />
+                  {reconciliationStatus?.type === 'error'
+                    ? 'Re-submission locked: History read failed'
+                    : !reconciliationStatus
+                    ? 'Re-submission locked: Check server history first'
+                    : 'Re-submission locked: Acknowledge duplicate risk to retry'}
+                </span>
+              )}
+            {isBlindResubmitBlocked &&
+              duplicateRiskAcknowledged &&
+              reconciliationStatus?.type !== 'error' && (
+                <span className="text-[11px] font-mono text-blue-400 mr-auto flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 shrink-0" />
+                  Duplicate risk acknowledged by operator
+                </span>
+              )}
             <Button
               type="button"
               variant="outline"
@@ -817,11 +850,16 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
               disabled={
                 isSubmitting ||
                 previewMode ||
-                (isBlindResubmitBlocked && !duplicateRiskAcknowledged) ||
-                isCheckingHistory
+                isCheckingHistory ||
+                (isBlindResubmitBlocked &&
+                  (!duplicateRiskAcknowledged ||
+                    !reconciliationStatus ||
+                    reconciliationStatus.type === 'error'))
               }
               className={`flex items-center gap-1.5 text-white ${
-                isBlindResubmitBlocked && duplicateRiskAcknowledged
+                isBlindResubmitBlocked &&
+                duplicateRiskAcknowledged &&
+                reconciliationStatus?.type !== 'error'
                   ? 'bg-amber-600 hover:bg-amber-500'
                   : 'bg-emerald-600 hover:bg-emerald-500'
               }`}
@@ -836,7 +874,9 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
                   <Clock className="w-4 h-4 animate-spin" />
                   Checking History...
                 </>
-              ) : isBlindResubmitBlocked && duplicateRiskAcknowledged ? (
+              ) : isBlindResubmitBlocked &&
+                duplicateRiskAcknowledged &&
+                reconciliationStatus?.type !== 'error' ? (
                 <>
                   <RotateCcw className="w-4 h-4" />
                   Submit Verification (Acknowledged Retry)

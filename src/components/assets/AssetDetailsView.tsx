@@ -70,6 +70,7 @@ import {
   Save,
   CheckCircle2,
   ArrowRightLeft,
+  Info,
 } from 'lucide-react';
 
 interface AssetDetailsViewProps {
@@ -136,25 +137,73 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
   const [verificationsError, setVerificationsError] = useState<string | null>(null);
   const [isRecordVerificationOpen, setIsRecordVerificationOpen] = useState(false);
 
-  // Evaluate mixed-precision ambiguity according to approved Policy P11-D01
-  const verificationEvaluation: VerificationChronologyEvaluation = React.useMemo(() => {
-    const qualifying = verifications.filter((v) => v.isSuccessful);
-    return evaluateVerificationChronology(
-      qualifying.map((v) => ({
-        id: v.id,
-        outcome: v.outcome,
-        datePrecision: v.datePrecision,
-        verifiedYear: v.verifiedYear,
-        verifiedMonth: v.verifiedMonth,
-        verifiedDay: v.verifiedDay,
-        verifiedDate: v.verifiedDate ? new Date(v.verifiedDate) : null,
-        verifiedYearMonth: v.verifiedYearMonth,
-        verifiedBy: v.verifiedBy,
-        createdAt: new Date(v.createdAt),
-        notes: v.notes,
-      }))
-    );
-  }, [verifications]);
+  // Server-authoritative conflict evaluation state (Policy P11-D01)
+  const [serverEvaluation, setServerEvaluation] = useState<
+    | (VerificationChronologyEvaluation & {
+        totalQualifyingRecords?: number;
+        isServerVerified?: boolean;
+      })
+    | null
+  >(null);
+  const [isEvaluationLoading, setIsEvaluationLoading] = useState(false);
+
+  const fetchServerEvaluation = useCallback(async () => {
+    if (previewMode) return;
+    setIsEvaluationLoading(true);
+    try {
+      const res = await fetch(`/api/assets/${assetId}/verifications/evaluation`, {
+        credentials: 'include',
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === 'ok' && json.data) {
+          setServerEvaluation({
+            ...json.data,
+            isServerVerified: true,
+          });
+        }
+      }
+    } catch {
+      // Evaluation fetch error handled gracefully; fallback to truthful unverified state
+    } finally {
+      setIsEvaluationLoading(false);
+    }
+  }, [assetId, previewMode]);
+
+  // Server-authoritative conflict evaluation
+  // If server-derived evaluation is available, it covers ALL qualifying records in the database.
+  // If only page 1 is loaded and total > verifications.length without server evaluation,
+  // conflict status is truthful: UNVERIFIED.
+  const hasMultiplePages = verificationPagination.total > verifications.length;
+  const isFullDatasetEvaluated =
+    !!serverEvaluation?.isServerVerified || (!hasMultiplePages && verifications.length > 0);
+
+  const verificationEvaluation: VerificationChronologyEvaluation & { isServerVerified?: boolean } =
+    React.useMemo(() => {
+      if (serverEvaluation?.isServerVerified) {
+        return serverEvaluation;
+      }
+      const qualifying = verifications.filter((v) => v.isSuccessful);
+      const local = evaluateVerificationChronology(
+        qualifying.map((v) => ({
+          id: v.id,
+          outcome: v.outcome,
+          datePrecision: v.datePrecision,
+          verifiedYear: v.verifiedYear,
+          verifiedMonth: v.verifiedMonth,
+          verifiedDay: v.verifiedDay,
+          verifiedDate: v.verifiedDate ? new Date(v.verifiedDate) : null,
+          verifiedYearMonth: v.verifiedYearMonth,
+          verifiedBy: v.verifiedBy,
+          createdAt: new Date(v.createdAt),
+          notes: v.notes,
+        }))
+      );
+      return {
+        ...local,
+        isServerVerified: false,
+      };
+    }, [serverEvaluation, verifications]);
 
   // Load Reference Catalogs for Edit Mode & Transfers
   const loadCatalogs = useCallback(async () => {
@@ -297,8 +346,58 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
       );
     }
 
+    await fetchServerEvaluation();
+
     const feedback = evaluatePostMutationRefresh('verification', refreshResult);
     setPostMutationFeedback(feedback);
+  };
+
+  const handleInspectHistoryReadOnly = async () => {
+    // Read-only refresh of verifications and asset without claiming mutation success
+    setIsRefreshing(true);
+    const refreshResult = await executeAuthoritativeRefresh(assetId, fetch, {
+      includeVerifications: true,
+      verificationsPage: 1,
+      verificationsLimit: 10,
+    });
+    setIsRefreshing(false);
+
+    if (refreshResult.assetData) {
+      setAsset(refreshResult.assetData);
+      setLoadError(null);
+    }
+    if (refreshResult.historyData) {
+      setRecentHistory(refreshResult.historyData.records);
+      setHistoryTotal(refreshResult.historyData.total);
+    }
+    if (refreshResult.transfersData) {
+      setTransfers(refreshResult.transfersData.records);
+      setActivePendingTransfer(refreshResult.transfersData.activePending);
+      if (refreshResult.transfersData.pagination) {
+        setTransferPagination(refreshResult.transfersData.pagination);
+      }
+    }
+    if (refreshResult.verificationsData) {
+      setVerifications(refreshResult.verificationsData.records);
+      setVerificationsError(null);
+      if (refreshResult.verificationsData.pagination) {
+        setVerificationPagination(refreshResult.verificationsData.pagination);
+      }
+    }
+    await fetchServerEvaluation();
+
+    // Set unverified POST feedback (distinct from confirmed POST mutation)
+    setPostMutationFeedback({
+      mutationConfirmed: false,
+      mutationType: 'verification',
+      refreshOk: refreshResult.ok,
+      refreshNotVerified: !refreshResult.ok,
+      title: 'UNVERIFIED POST OUTCOME // INSPECTED SERVER HISTORY',
+      message:
+        'Transmission outcome of recent verification remains UNVERIFIED. Server history has been refreshed via read-only GET. Please review the records below.',
+      isTransferStateUnverified: false,
+      canRetryRefresh: true,
+    });
   };
 
   const handleTransferMutationSuccess = async (mutationType: MutationType = 'create') => {
@@ -381,8 +480,9 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
   useEffect(() => {
     fetchAssetData(true);
     loadVerificationsPage(1);
+    fetchServerEvaluation();
     loadCatalogs();
-  }, [fetchAssetData, loadVerificationsPage, loadCatalogs]);
+  }, [fetchAssetData, loadVerificationsPage, fetchServerEvaluation, loadCatalogs]);
 
   // Enter Edit Mode
   const handleStartEdit = () => {
@@ -1275,12 +1375,19 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
                 {verificationEvaluation.isAmbiguous
                   ? 'Authoritative Verification Summary — Ambiguity Detected'
+                  : !isFullDatasetEvaluated && hasMultiplePages
+                  ? `Authoritative Verification Summary — Partial View (Page 1 of ${verificationPagination.totalPages})`
                   : 'Latest Confirmed Verification Summary'}
               </span>
               {verificationEvaluation.isAmbiguous ? (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-bold border border-amber-600/70 bg-amber-950/80 text-amber-300 uppercase tracking-wider">
                   <AlertTriangle className="w-3 h-3 text-amber-400" />
                   Resolution Required (Policy P11-D01)
+                </span>
+              ) : !isFullDatasetEvaluated && hasMultiplePages ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/90 text-zinc-300 uppercase tracking-wider">
+                  <Clock className="w-3 h-3 text-zinc-400" />
+                  Full-Dataset Conflict Check Pending
                 </span>
               ) : asset.lastVerificationOutcome ? (
                 (() => {
@@ -1301,6 +1408,18 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
                 </span>
               )}
             </div>
+
+            {!isFullDatasetEvaluated && hasMultiplePages && !verificationEvaluation.isAmbiguous && (
+              <div className="p-3 bg-zinc-900/60 border border-zinc-800 rounded text-xs text-zinc-400 font-mono space-y-1">
+                <div className="flex items-center gap-1.5 text-zinc-300 font-semibold">
+                  <Info className="w-3.5 h-3.5 text-blue-400" />
+                  Partial History Page Inspected
+                </div>
+                <p className="text-[11px] leading-relaxed">
+                  Only the 10 most recent observations are currently loaded in this client page ({verificationPagination.total} total exist). Because additional observations exist outside this page, full-dataset conflict status is being verified on the server.
+                </p>
+              </div>
+            )}
 
             {verificationEvaluation.isAmbiguous ? (
               <div className="p-3.5 bg-amber-950/30 border border-amber-800/60 rounded-md space-y-3 text-xs">
@@ -1661,6 +1780,7 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
           onUncertainNetworkState={(_draft) => {
             // Keep draft preserved in modal
           }}
+          onInspectHistoryReadOnly={handleInspectHistoryReadOnly}
         />
       )}
     </div>

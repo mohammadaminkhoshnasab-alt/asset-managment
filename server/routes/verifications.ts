@@ -15,6 +15,46 @@ function getSessionActor(req: Request): string {
 }
 
 /**
+ * GET /api/assets/:assetId/verifications/evaluation
+ * Evaluates chronological precedence and mixed-precision ambiguity (Policy P11-D01)
+ * across ALL qualifying records on the server.
+ * Returns server-authoritative evaluation without unbounded client loading.
+ */
+verificationRouter.get('/evaluation', async (req: Request, res: Response) => {
+  const { assetId } = req.params;
+
+  if (!isValidUuid(assetId)) {
+    res.status(400).json({
+      status: 'error',
+      error: 'Malformed asset ID. Expected standard RFC 4122 UUID format.',
+    });
+    return;
+  }
+
+  try {
+    const evaluation = await verificationService.getVerificationEvaluation(assetId);
+    res.status(200).json({
+      status: 'ok',
+      data: evaluation,
+    });
+  } catch (err: any) {
+    if (err instanceof AssetNotFoundError) {
+      res.status(404).json({
+        status: 'error',
+        error: err.message,
+      });
+      return;
+    }
+
+    console.error('[VerificationRoute] Error evaluating verifications:', err.message);
+    res.status(500).json({
+      status: 'error',
+      error: 'Failed to evaluate asset physical verifications.',
+    });
+  }
+});
+
+/**
  * GET /api/assets/:assetId/verifications
  * Retrieves bounded chronological physical verification records for an asset.
  * Enforces validated page/limit pagination (max 100) and deterministic ordering.

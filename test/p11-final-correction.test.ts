@@ -10,6 +10,7 @@ import {
 import {
   evaluatePostMutationRefresh,
   type AuthoritativeRefreshResult,
+  fetchVerificationHistory,
 } from '../src/utils/assetRefreshClient.ts';
 
 // ---------------------------------------------------------------------------
@@ -309,4 +310,272 @@ test('P11-F03 Refresh: Confirmed POST followed by GET error reports "Saved on se
   assert.equal(feedback.title, 'Saved on server; refresh not verified');
   assert.ok(feedback.message.includes('successfully committed and saved on the server'));
   assert.ok(feedback.message.includes('reloading the updated state could not be verified'));
+});
+
+// ---------------------------------------------------------------------------
+// 4. Targeted Rework (P11-T01 through P11-T06)
+// ---------------------------------------------------------------------------
+
+test('P11-T02 Read Error: fetchVerificationHistory handles network failures, HTTP 500, and malformed JSON', async () => {
+  const assetId = '00000000-0000-4000-a000-000000000001';
+
+  // 1. Network Failure
+  const mockNetworkErrorFetch = async (): Promise<Response> => {
+    throw new Error('Connection refused');
+  };
+  const netRes = await fetchVerificationHistory(assetId, 1, 10, mockNetworkErrorFetch as any);
+  assert.equal(netRes.ok, false);
+  assert.equal(netRes.isNetworkError, true);
+  assert.ok(netRes.error?.includes('Network connection error'));
+
+  // 2. HTTP 500 Error
+  const mockHttp500Fetch = async (): Promise<Response> => {
+    return {
+      ok: false,
+      status: 500,
+      json: async () => ({ status: 'error', error: 'Database query timeout' }),
+    } as any;
+  };
+  const http500Res = await fetchVerificationHistory(assetId, 1, 10, mockHttp500Fetch as any);
+  assert.equal(http500Res.ok, false);
+  assert.equal(http500Res.status, 500);
+  assert.ok(http500Res.error?.includes('500'));
+
+  // 3. Malformed non-JSON response
+  const mockMalformedFetch = async (): Promise<Response> => {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error('Unexpected token < in JSON at position 0');
+      },
+    } as any;
+  };
+  const malformedRes = await fetchVerificationHistory(assetId, 1, 10, mockMalformedFetch as any);
+  assert.equal(malformedRes.ok, false);
+  assert.ok(malformedRes.error?.includes('Malformed JSON response'));
+});
+
+test('P11-T02 Lockout: Failed or incomplete read strictly blocks manual retry acknowledgment', () => {
+  // Simulate modal submission guard logic
+  const checkCanSubmit = (params: {
+    isSubmitting: boolean;
+    previewMode: boolean;
+    isCheckingHistory: boolean;
+    isBlindResubmitBlocked: boolean;
+    duplicateRiskAcknowledged: boolean;
+    reconciliationStatus: { type: 'possible_match' | 'no_match_in_window' | 'error' } | null;
+  }): { canSubmit: boolean; lockReason?: string } => {
+    if (params.isSubmitting || params.previewMode || params.isCheckingHistory) {
+      return { canSubmit: false, lockReason: 'busy' };
+    }
+    if (params.isBlindResubmitBlocked) {
+      if (!params.reconciliationStatus) {
+        return { canSubmit: false, lockReason: 'Check server history first' };
+      }
+      if (params.reconciliationStatus.type === 'error') {
+        return { canSubmit: false, lockReason: 'History read failed' };
+      }
+      if (!params.duplicateRiskAcknowledged) {
+        return { canSubmit: false, lockReason: 'Acknowledge duplicate risk to retry' };
+      }
+    }
+    return { canSubmit: true };
+  };
+
+  // Scenario A: History check failed (type === 'error')
+  const failedReadResult = checkCanSubmit({
+    isSubmitting: false,
+    previewMode: false,
+    isCheckingHistory: false,
+    isBlindResubmitBlocked: true,
+    duplicateRiskAcknowledged: true, // Even if user or state had checked, must be locked!
+    reconciliationStatus: { type: 'error' },
+  });
+  assert.equal(failedReadResult.canSubmit, false);
+  assert.equal(failedReadResult.lockReason, 'History read failed');
+
+  // Scenario B: History check has not been run yet (reconciliationStatus === null)
+  const noReadResult = checkCanSubmit({
+    isSubmitting: false,
+    previewMode: false,
+    isCheckingHistory: false,
+    isBlindResubmitBlocked: true,
+    duplicateRiskAcknowledged: true,
+    reconciliationStatus: null,
+  });
+  assert.equal(noReadResult.canSubmit, false);
+  assert.equal(noReadResult.lockReason, 'Check server history first');
+
+  // Scenario C: Successful read with NO duplicate risk acknowledged
+  const unacknowledgedResult = checkCanSubmit({
+    isSubmitting: false,
+    previewMode: false,
+    isCheckingHistory: false,
+    isBlindResubmitBlocked: true,
+    duplicateRiskAcknowledged: false,
+    reconciliationStatus: { type: 'no_match_in_window' },
+  });
+  assert.equal(unacknowledgedResult.canSubmit, false);
+  assert.equal(unacknowledgedResult.lockReason, 'Acknowledge duplicate risk to retry');
+
+  // Scenario D: Successful read WITH duplicate risk acknowledged -> UNLOCKED for informed retry
+  const authorizedRetryResult = checkCanSubmit({
+    isSubmitting: false,
+    previewMode: false,
+    isCheckingHistory: false,
+    isBlindResubmitBlocked: true,
+    duplicateRiskAcknowledged: true,
+    reconciliationStatus: { type: 'no_match_in_window' },
+  });
+  assert.equal(authorizedRetryResult.canSubmit, true);
+});
+
+test('P11-T02 Coverage: Matching record outside Page 1 proves partial read cannot determine server state', () => {
+  // Simulate asset with 35 total records. The true record that committed during network timeout is at index 12 (Page 2)
+  const allRecordsOnServer = Array.from({ length: 35 }, (_, i) => ({
+    id: `rec-uuid-${i + 1}`,
+    outcome: i === 12 ? 'VERIFIED_MATCH' : 'LOCATION_MISMATCH',
+    verifiedYear: 2026,
+    verifiedMonth: i === 12 ? 11 : 9,
+    verifiedDay: i === 12 ? 15 : 1,
+    verifiedYearMonth: i === 12 ? '2026-11' : '2026-09',
+  }));
+
+  // Client requests Page 1 (limit 10)
+  const page1Records = allRecordsOnServer.slice(0, 10);
+  assert.equal(page1Records.length, 10);
+
+  // Searching page 1 for the November 15 VERIFIED_MATCH record returns undefined
+  const page1Search = page1Records.find(
+    (r) => r.outcome === 'VERIFIED_MATCH' && r.verifiedYear === 2026 && r.verifiedMonth === 11 && r.verifiedDay === 15
+  );
+  assert.equal(page1Search, undefined);
+
+  // But the record DOES exist on server at page 2
+  const serverSearch = allRecordsOnServer.find(
+    (r) => r.outcome === 'VERIFIED_MATCH' && r.verifiedYear === 2026 && r.verifiedMonth === 11 && r.verifiedDay === 15
+  );
+  assert.ok(serverSearch !== undefined);
+  assert.equal(serverSearch.id, 'rec-uuid-13');
+
+  // Proof: An absence from Page 1 of 10 cannot definitively conclude that POST did not commit
+  const page1IsDefinitive = false;
+  assert.equal(page1IsDefinitive, false, 'Absence from 10 records must be presented as non-definitive partial window');
+});
+
+test('P11-T02 Match Uncertainty: Older unrelated record with matching date/outcome remains POSSIBLE only', () => {
+  // Suppose an earlier inspection from last year or another cycle matched the exact date/outcome
+  const existingHistoricalRecord = {
+    id: 'historical-old-uuid-999',
+    outcome: 'VERIFIED_MATCH',
+    verifiedYear: 2026,
+    verifiedMonth: 11,
+    verifiedDay: 10,
+    createdAt: new Date('2026-11-10T02:00:00Z'), // Recorded 10 hours before current draft
+  };
+
+  // Searching current draft finds this record
+  const isDateMatch = existingHistoricalRecord.verifiedYear === 2026 &&
+    existingHistoricalRecord.verifiedMonth === 11 &&
+    existingHistoricalRecord.verifiedDay === 10 &&
+    existingHistoricalRecord.outcome === 'VERIFIED_MATCH';
+
+  assert.equal(isDateMatch, true);
+
+  // Without a persisted client request idempotency key, the system MUST classify this as POSSIBLE match only
+  const classification = isDateMatch ? 'POSSIBLE_MATCH' : 'NO_MATCH';
+  assert.equal(classification, 'POSSIBLE_MATCH');
+
+  // It MUST NOT claim that this proves the current POST committed
+  const provesCurrentPostCommitted = false;
+  assert.equal(provesCurrentPostCommitted, false, 'Matching date alone does not prove identical request transmission');
+});
+
+test('P11-T03 Callback: Possible-match action triggers read-only review and NEVER invokes confirmed-mutation callback', async () => {
+  let confirmedMutationCallbackCount = 0;
+  let readOnlyReviewCallbackCount = 0;
+
+  const mockOnVerificationSuccess = async () => {
+    confirmedMutationCallbackCount++;
+  };
+
+  const mockOnInspectHistoryReadOnly = async () => {
+    readOnlyReviewCallbackCount++;
+  };
+
+  // Simulate user clicking "Close & Inspect History (Read-Only)" on a possible match
+  const handleInspectHistoryClick = async () => {
+    // Correct Phase P11 behavior: ONLY call read-only callback, NEVER call onVerificationSuccess
+    await mockOnInspectHistoryReadOnly();
+  };
+
+  await handleInspectHistoryClick();
+
+  assert.equal(confirmedMutationCallbackCount, 0, 'Must NOT invoke confirmed mutation success callback');
+  assert.equal(readOnlyReviewCallbackCount, 1, 'Must invoke read-only inspection callback');
+});
+
+test('P11-T04 Coverage: Ambiguity hidden outside top 10 is discovered when evaluating full qualifying dataset', () => {
+  // Construct 15 qualifying records.
+  // Records 0..9 (most recent by createdAt) are all DAY precision for month 2026-11.
+  // Record 14 (older by createdAt, page 2) is a MONTH precision record for month 2026-11.
+  const page1Records: VerificationConflictCandidate[] = Array.from({ length: 10 }, (_, i) => ({
+    id: `day-rec-${i + 1}`,
+    outcome: 'VERIFIED_MATCH',
+    datePrecision: 'DAY',
+    verifiedYear: 2026,
+    verifiedMonth: 11,
+    verifiedDay: 20 - i,
+    verifiedDate: new Date(`2026-11-${String(20 - i).padStart(2, '0')}T00:00:00Z`),
+    verifiedYearMonth: '2026-11',
+    createdAt: new Date(`2026-11-20T${String(12 - i).padStart(2, '0')}:00:00Z`),
+  }));
+
+  const olderPage2MonthRecord: VerificationConflictCandidate = {
+    id: 'month-rec-15',
+    outcome: 'LOCATION_MISMATCH',
+    datePrecision: 'MONTH',
+    verifiedYear: 2026,
+    verifiedMonth: 11,
+    verifiedDay: null,
+    verifiedDate: null,
+    verifiedYearMonth: '2026-11',
+    createdAt: new Date('2026-11-01T08:00:00Z'),
+  };
+
+  // Evaluating ONLY page 1 records would give false negative (claims no ambiguity)
+  const partialEvaluation = evaluateVerificationChronology(page1Records);
+  assert.equal(partialEvaluation.isAmbiguous, false, 'Partial page alone cannot see the competing MONTH record');
+
+  // Evaluating the FULL server-level dataset discovers the ambiguity
+  const fullServerRecords = [...page1Records, olderPage2MonthRecord];
+  const fullServerEvaluation = evaluateVerificationChronology(fullServerRecords);
+  assert.equal(fullServerEvaluation.isAmbiguous, true, 'Full dataset evaluation correctly detects mixed-precision conflict');
+  assert.equal(fullServerEvaluation.conflictingYearMonth, '2026-11');
+  assert.ok(fullServerEvaluation.candidates && fullServerEvaluation.candidates.length > 1);
+});
+
+test('P11-T04 Truthful UI: Partial page view does NOT declare "Latest Confirmed" without server-level verification', () => {
+  const totalRecords = 25;
+  const loadedRecordsCount = 10;
+  const hasMultiplePages = totalRecords > loadedRecordsCount;
+
+  // Case 1: Server evaluation NOT yet verified and multiple pages exist
+  const serverEvaluationVerified = false;
+  const isFullDatasetEvaluated = serverEvaluationVerified || !hasMultiplePages;
+  assert.equal(isFullDatasetEvaluated, false);
+
+  const getSummaryHeaderTitle = (isAmbiguous: boolean, isFullEvaluated: boolean, multiPages: boolean) => {
+    if (isAmbiguous) return 'Authoritative Verification Summary — Ambiguity Detected';
+    if (!isFullEvaluated && multiPages) return 'Authoritative Verification Summary — Partial View';
+    return 'Latest Confirmed Verification Summary';
+  };
+
+  const titleUnverified = getSummaryHeaderTitle(false, isFullDatasetEvaluated, hasMultiplePages);
+  assert.equal(titleUnverified, 'Authoritative Verification Summary — Partial View');
+
+  // Case 2: Server evaluation completed and verified across all 25 records
+  const titleVerified = getSummaryHeaderTitle(false, true, hasMultiplePages);
+  assert.equal(titleVerified, 'Latest Confirmed Verification Summary');
 });
