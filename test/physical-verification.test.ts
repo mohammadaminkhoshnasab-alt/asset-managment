@@ -14,7 +14,10 @@ import {
   VALID_VERIFICATION_OUTCOMES,
   VALID_DATE_PRECISIONS,
 } from '../server/validators/verificationValidators.ts';
-import { compareVerificationChronology } from '../server/services/verificationService.ts';
+import {
+  compareVerificationChronology,
+  evaluateVerificationChronology,
+} from '../server/services/verificationService.ts';
 import { validatePatchAssetInput } from '../server/validators/assetValidators.ts';
 
 const schemaPath = path.resolve(process.cwd(), 'prisma/schema.prisma');
@@ -366,27 +369,42 @@ test('P11 Chronology: DAY precision orders by day within same month', () => {
   assert.ok(compareVerificationChronology(day5, day20) > 0);
 });
 
-test('P11 Chronology: Same-month DAY vs MONTH avoids fabricating days and uses createdAt deterministically', () => {
+test('P11-D01 Chronology: Same-month DAY vs MONTH is flagged as ambiguous and does NOT pick automatic winner', () => {
   const daySpecific = {
+    id: '00000000-0000-4000-a000-000000000007',
+    outcome: VerificationOutcome.VERIFIED_MATCH,
     verifiedYear: 2026,
     verifiedMonth: 11,
     verifiedDay: 15,
+    verifiedDate: new Date('2026-11-15T00:00:00Z'),
+    verifiedYearMonth: '2026-11',
     datePrecision: DatePrecision.DAY,
     createdAt: new Date('2026-11-15T10:00:00Z'),
-    id: '00000000-0000-4000-a000-000000000007',
   };
 
   const monthGeneralLater = {
+    id: '00000000-0000-4000-a000-000000000008',
+    outcome: VerificationOutcome.LOCATION_MISMATCH,
     verifiedYear: 2026,
     verifiedMonth: 11,
     verifiedDay: null,
+    verifiedDate: null,
+    verifiedYearMonth: '2026-11',
     datePrecision: DatePrecision.MONTH,
     createdAt: new Date('2026-11-28T10:00:00Z'),
-    id: '00000000-0000-4000-a000-000000000008',
   };
 
-  // Same year and month: later recorded observation takes precedence without inventing a false day
-  assert.ok(compareVerificationChronology(daySpecific, monthGeneralLater) > 0);
+  // Under Policy P11-D01: compareVerificationChronology returns 0 (ambiguous precedence)
+  assert.equal(compareVerificationChronology(daySpecific, monthGeneralLater), 0);
+  assert.equal(compareVerificationChronology(monthGeneralLater, daySpecific), 0);
+
+  // evaluateVerificationChronology identifies the mixed-precision conflict and returns all candidates
+  const evaluation = evaluateVerificationChronology([daySpecific, monthGeneralLater]);
+  assert.equal(evaluation.isAmbiguous, true);
+  assert.equal(evaluation.ambiguityReason, 'MIXED_PRECISION_CONFLICT');
+  assert.equal(evaluation.conflictingYearMonth, '2026-11');
+  assert.equal(evaluation.candidates?.length, 2);
+  assert.equal(evaluation.authoritativeRecord, undefined);
 });
 
 // ---------------------------------------------------------------------------

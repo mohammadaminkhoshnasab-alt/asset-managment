@@ -47,6 +47,10 @@ import {
   getOutcomeBadge,
 } from './AssetVerificationHistory.tsx';
 import {
+  evaluateVerificationChronology,
+  type VerificationChronologyEvaluation,
+} from '../../utils/verificationEvaluation.ts';
+import {
   Cpu,
   Sliders,
   UserCheck,
@@ -131,6 +135,26 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
   const [isVerificationsLoading, setIsVerificationsLoading] = useState(false);
   const [verificationsError, setVerificationsError] = useState<string | null>(null);
   const [isRecordVerificationOpen, setIsRecordVerificationOpen] = useState(false);
+
+  // Evaluate mixed-precision ambiguity according to approved Policy P11-D01
+  const verificationEvaluation: VerificationChronologyEvaluation = React.useMemo(() => {
+    const qualifying = verifications.filter((v) => v.isSuccessful);
+    return evaluateVerificationChronology(
+      qualifying.map((v) => ({
+        id: v.id,
+        outcome: v.outcome,
+        datePrecision: v.datePrecision,
+        verifiedYear: v.verifiedYear,
+        verifiedMonth: v.verifiedMonth,
+        verifiedDay: v.verifiedDay,
+        verifiedDate: v.verifiedDate ? new Date(v.verifiedDate) : null,
+        verifiedYearMonth: v.verifiedYearMonth,
+        verifiedBy: v.verifiedBy,
+        createdAt: new Date(v.createdAt),
+        notes: v.notes,
+      }))
+    );
+  }, [verifications]);
 
   // Load Reference Catalogs for Edit Mode & Transfers
   const loadCatalogs = useCallback(async () => {
@@ -1249,9 +1273,16 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#181d28] pb-2.5">
               <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider flex items-center gap-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                Latest Confirmed Verification Summary
+                {verificationEvaluation.isAmbiguous
+                  ? 'Authoritative Verification Summary — Ambiguity Detected'
+                  : 'Latest Confirmed Verification Summary'}
               </span>
-              {asset.lastVerificationOutcome ? (
+              {verificationEvaluation.isAmbiguous ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-bold border border-amber-600/70 bg-amber-950/80 text-amber-300 uppercase tracking-wider">
+                  <AlertTriangle className="w-3 h-3 text-amber-400" />
+                  Resolution Required (Policy P11-D01)
+                </span>
+              ) : asset.lastVerificationOutcome ? (
                 (() => {
                   const badge = getOutcomeBadge(asset.lastVerificationOutcome);
                   const BadgeIcon = badge.icon;
@@ -1271,7 +1302,93 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
               )}
             </div>
 
-            {asset.lastVerificationOutcome || asset.lastVerifiedYearMonth ? (
+            {verificationEvaluation.isAmbiguous ? (
+              <div className="p-3.5 bg-amber-950/30 border border-amber-800/60 rounded-md space-y-3 text-xs">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-amber-200 uppercase tracking-wider">
+                      Mixed DAY & MONTH Precision Conflict ({verificationEvaluation.conflictingYearMonth})
+                    </span>
+                    <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
+                      Approved Policy P11-D01: Competing physical inspections with DAY precision and MONTH precision
+                      exist for the same calendar month. The system strictly forbids selecting an automatic winner
+                      using record creation time (createdAt) or inventing calendar days. An authenticated administrator
+                      must explicitly select which candidate is authoritative.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Candidate Observations Table */}
+                <div className="space-y-1.5 pt-1">
+                  <div className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
+                    Competing Candidate Observations for {verificationEvaluation.conflictingYearMonth}:
+                  </div>
+                  <div className="border border-zinc-800 rounded overflow-hidden divide-y divide-zinc-800/80 bg-zinc-950/70">
+                    {verificationEvaluation.candidates?.map((candidate) => {
+                      const badge = getOutcomeBadge(candidate.outcome || 'VERIFIED_MATCH');
+                      const BadgeIcon = badge.icon;
+                      return (
+                        <div
+                          key={candidate.id}
+                          className="p-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px]"
+                        >
+                          <div className="space-y-0.5 min-w-[220px]">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-bold text-zinc-400">
+                                ID: {candidate.id.slice(0, 8)}...
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
+                                  candidate.datePrecision === 'DAY'
+                                    ? 'bg-blue-950/70 border border-blue-700/60 text-blue-300'
+                                    : 'bg-purple-950/70 border border-purple-700/60 text-purple-300'
+                                }`}
+                              >
+                                {candidate.datePrecision === 'DAY'
+                                  ? `DAY: ${candidate.verifiedYear}-${String(candidate.verifiedMonth).padStart(2, '0')}-${String(candidate.verifiedDay).padStart(2, '0')}`
+                                  : `MONTH: ${candidate.verifiedYearMonth} (Day Unknown)`}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-zinc-500">
+                              Registered: {new Date(candidate.createdAt).toLocaleString()} by {candidate.verifiedBy || 'admin'}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border uppercase ${badge.className}`}
+                            >
+                              <BadgeIcon className="w-3 h-3" />
+                              {badge.label}
+                            </span>
+                            <span className="text-[10px] text-zinc-500 italic">
+                              {candidate.datePrecision === 'DAY'
+                                ? '→ Summary: lastVerifiedAt = observed date'
+                                : '→ Summary: lastVerifiedAt = null (Day Unknown)'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Schema Approval Gate Notice */}
+                <div className="p-2.5 bg-zinc-900/60 border border-zinc-800 rounded text-[11px] text-zinc-300 space-y-1">
+                  <div className="font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    Option D Persistence Gate (Schema Approval Required)
+                  </div>
+                  <p className="text-[10px] text-zinc-400 leading-relaxed">
+                    The business policy for Option D is active and detecting conflicts. Durably persisting the explicit
+                    operator decision with relational foreign keys, candidate snapshots, and concurrency safety requires
+                    the proposed additive database migration. Per Section 7 of the specification, write submission is
+                    blocked pending owner approval of the schema migration.
+                  </p>
+                </div>
+              </div>
+            ) : asset.lastVerificationOutcome || asset.lastVerifiedYearMonth ? (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                 <div className="p-2.5 bg-[#0d1015] border border-[#1d2330] rounded">
                   <span className="block text-[10px] text-slate-500 uppercase">Verified Date / Month</span>

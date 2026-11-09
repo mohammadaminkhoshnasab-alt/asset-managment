@@ -116,6 +116,7 @@ verificationRouter.post('/', async (req: Request, res: Response) => {
       data: result.verification,
       latestSummary: result.latestSummary,
       summaryChanged: result.summaryChanged,
+      isAmbiguous: result.isAmbiguous ?? false,
     });
   } catch (err: any) {
     if (err instanceof AssetNotFoundError) {

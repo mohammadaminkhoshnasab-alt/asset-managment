@@ -9,7 +9,11 @@ import {
 } from '../src/utils/assetRefreshClient.ts';
 import type { AssetDetails } from '../src/types/asset.ts';
 import type { PhysicalVerificationRecord } from '../src/types/verification.ts';
-import { isSerializationFailure, compareVerificationChronology } from '../server/services/verificationService.ts';
+import {
+  isSerializationFailure,
+  compareVerificationChronology,
+  evaluateVerificationChronology,
+} from '../server/services/verificationService.ts';
 import { validateCreateVerificationInput } from '../server/validators/verificationValidators.ts';
 import { DatePrecision, VerificationOutcome } from '@prisma/client';
 
@@ -302,27 +306,40 @@ test('P11-R05 Invariants: MONTH precision strictly enforces verifiedDay=null wit
   }
 });
 
-test('P11-R06 Policy Documentation: Same-month DAY vs MONTH ordering documented as open approval decision', () => {
+test('P11-D01 Policy: Same-month DAY vs MONTH ordering strictly enforces Operator Resolution without automatic createdAt winner', () => {
   const dayRec = {
+    id: '00000000-0000-4000-a000-000000000010',
+    outcome: VerificationOutcome.VERIFIED_MATCH,
     verifiedYear: 2026,
     verifiedMonth: 11,
     verifiedDay: 10,
+    verifiedDate: new Date('2026-11-10T00:00:00Z'),
+    verifiedYearMonth: '2026-11',
     datePrecision: DatePrecision.DAY,
     createdAt: new Date('2026-11-10T08:00:00Z'),
-    id: '00000000-0000-4000-a000-000000000010',
   };
 
   const monthRec = {
+    id: '00000000-0000-4000-a000-000000000011',
+    outcome: VerificationOutcome.LOCATION_MISMATCH,
     verifiedYear: 2026,
     verifiedMonth: 11,
     verifiedDay: null,
+    verifiedDate: null,
+    verifiedYearMonth: '2026-11',
     datePrecision: DatePrecision.MONTH,
     createdAt: new Date('2026-11-10T12:00:00Z'),
-    id: '00000000-0000-4000-a000-000000000011',
   };
 
-  // The comparator orders based on createdAt without inventing calendar day 1 or 31
+  // Under Policy P11-D01: compareVerificationChronology does NOT pick createdAt as automatic winner
   const order = compareVerificationChronology(dayRec, monthRec);
-  assert.ok(order > 0, 'Uses createdAt deterministic tie-breaker');
-  // Flagged for final report as OPEN DECISION / BLOCKED FOR POLICY APPROVAL
+  assert.equal(order, 0, 'Must return 0 (ambiguous precedence) instead of using createdAt tie-breaker');
+
+  // evaluateVerificationChronology flags the mixed same-month precision conflict
+  const evaluation = evaluateVerificationChronology([dayRec, monthRec]);
+  assert.equal(evaluation.isAmbiguous, true);
+  assert.equal(evaluation.ambiguityReason, 'MIXED_PRECISION_CONFLICT');
+  assert.equal(evaluation.conflictingYearMonth, '2026-11');
+  assert.equal(evaluation.candidates?.length, 2);
+  assert.equal(evaluation.authoritativeRecord, undefined);
 });

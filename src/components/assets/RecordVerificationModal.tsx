@@ -91,10 +91,16 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
   const [isBlindResubmitBlocked, setIsBlindResubmitBlocked] = useState<boolean>(false);
   const [isCheckingHistory, setIsCheckingHistory] = useState<boolean>(false);
   const [reconciliationStatus, setReconciliationStatus] = useState<{
-    type: 'found' | 'not_found' | 'error';
+    type: 'possible_match' | 'no_match_in_window' | 'error';
+    title: string;
     message: string;
-    record?: PhysicalVerificationRecord;
+    details?: string;
+    inspectedCount?: number;
+    totalRecords?: number;
+    inspectedAt?: string;
+    matchedRecord?: PhysicalVerificationRecord;
   } | null>(null);
+  const [duplicateRiskAcknowledged, setDuplicateRiskAcknowledged] = useState<boolean>(false);
 
   // Synchronize day within allowed max days if month or year changes
   useEffect(() => {
@@ -141,6 +147,7 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
   const handleCheckVerificationHistory = async () => {
     setIsCheckingHistory(true);
     setErrorMessage(null);
+    setDuplicateRiskAcknowledged(false);
     try {
       const res = await fetch(`/api/assets/${asset.id}/verifications?page=1&limit=10`, {
         credentials: 'include',
@@ -148,14 +155,18 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
       if (!res.ok) {
         setReconciliationStatus({
           type: 'error',
-          message: `Server returned HTTP ${res.status} when checking verification history. Blind resubmission remains locked.`,
+          title: 'Incomplete / Failed Read',
+          message: `Server returned HTTP ${res.status} when checking verification history.`,
+          details: 'Unable to verify server history. Outcome remains UNVERIFIED. Blind resubmission remains locked.',
         });
         return;
       }
       const json = await res.json().catch(() => ({}));
       const records: PhysicalVerificationRecord[] = json.data || [];
+      const totalRecords = json.pagination?.total ?? records.length;
+      const inspectedAt = new Date().toLocaleTimeString();
 
-      // Find matching record submitted around this inspection target
+      // Find any potential record with matching date and outcome
       const matched = records.find((r) => {
         const matchOutcome = r.outcome === outcome;
         const matchYear = r.verifiedYear === year;
@@ -166,21 +177,32 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
 
       if (matched) {
         setReconciliationStatus({
-          type: 'found',
-          message: `A matching physical verification was found recorded on the server (${matched.outcome} on ${matched.verifiedYearMonth || matched.verifiedYear}). The record was committed successfully.`,
-          record: matched,
+          type: 'possible_match',
+          title: 'POSSIBLE MATCH FOUND (Non-Definitive)',
+          message: `Inspected Page 1 (10 of ${totalRecords} total records) at ${inspectedAt}. Found a verification record with matching date and outcome (${matched.outcome} on ${matched.verifiedYearMonth || matched.verifiedYear}, ID: ${matched.id.slice(0, 8)}...).`,
+          details: 'Notice: Without a per-request idempotency contract, this potential match cannot definitively prove whether your recent POST committed or this is an existing observation. Server outcome remains UNVERIFIED. Review the record or acknowledge duplicate risk before retrying.',
+          inspectedCount: records.length,
+          totalRecords,
+          inspectedAt,
+          matchedRecord: matched,
         });
       } else {
         setReconciliationStatus({
-          type: 'not_found',
-          message: `Checked server at ${new Date().toLocaleTimeString()}: No matching verification record was found on the server. Your draft is preserved below and you may now submit.`,
+          type: 'no_match_in_window',
+          title: 'NO MATCH IN INSPECTED WINDOW (Non-Definitive)',
+          message: `Inspected Page 1 (${records.length} records of ${totalRecords} total records) at ${inspectedAt}. No record matching outcome and date was found in the 10 most recent records.`,
+          details: 'Notice: Absence from the 10 most recent records does NOT definitively prove whether your POST committed on the server. Server outcome remains UNVERIFIED. Your draft is preserved below. To submit again, explicitly acknowledge the potential duplicate risk below.',
+          inspectedCount: records.length,
+          totalRecords,
+          inspectedAt,
         });
-        setIsBlindResubmitBlocked(false);
       }
     } catch {
       setReconciliationStatus({
         type: 'error',
-        message: 'Network connection failed while checking verification history. Blind resubmission remains locked for safety.',
+        title: 'Network Read Error',
+        message: 'Network connection failed while checking verification history.',
+        details: 'Server could not be reached. State remains UNVERIFIED. Blind resubmission remains locked.',
       });
     } finally {
       setIsCheckingHistory(false);
@@ -198,9 +220,9 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
       return;
     }
 
-    if (isBlindResubmitBlocked) {
+    if (isBlindResubmitBlocked && !duplicateRiskAcknowledged) {
       setErrorMessage(
-        'Blind re-submission is locked following an uncertain transmission. Please click "Check Verification History" to reconcile state before submitting again.'
+        'Blind re-submission is locked following an uncertain transmission. Please check verification history and explicitly acknowledge duplicate-record risk before submitting again.'
       );
       return;
     }
@@ -238,6 +260,7 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
         // Confirmed save on server
         setIsBlindResubmitBlocked(false);
         setNetworkUncertainWarning(false);
+        setDuplicateRiskAcknowledged(false);
         await onVerificationSuccess(data.data);
         onClose();
       } else if (response.status === 400) {
@@ -259,9 +282,10 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
       // Retain draft and inform user truthfully; block blind resubmission.
       setNetworkUncertainWarning(true);
       setIsBlindResubmitBlocked(true);
+      setDuplicateRiskAcknowledged(false);
       setReconciliationStatus(null);
       setErrorMessage(
-        'Network connection interrupted during save. The verification record may or may not have reached the server. Blind re-submission is locked to prevent duplicates. Please check verification history before re-attempting.'
+        'Network connection interrupted during save. The verification record may or may not have reached the server. Blind re-submission is locked to prevent duplicates. Please check verification history and review server state before retrying.'
       );
       onUncertainNetworkState(payload);
     } finally {
@@ -358,54 +382,120 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
             </p>
           </div>
 
-          {/* Reconciliation Status: Found existing committed record */}
-          {reconciliationStatus?.type === 'found' && (
+          {/* Reconciliation Status: Possible Match Found */}
+          {reconciliationStatus?.type === 'possible_match' && (
             <div
               role="alert"
-              className="p-3 bg-emerald-950/70 border border-emerald-600/80 rounded-md text-emerald-200 text-xs space-y-2"
+              className="p-3.5 bg-amber-950/70 border border-amber-600/80 rounded-md text-amber-200 text-xs space-y-2.5"
             >
-              <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-emerald-300">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                Committed Record Verified on Server
+              <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-amber-300">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                {reconciliationStatus.title}
               </div>
               <p className="leading-relaxed font-mono text-[11px]">
                 {reconciliationStatus.message}
               </p>
-              <div className="pt-1">
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={async () => {
-                    if (reconciliationStatus.record) {
-                      await onVerificationSuccess(reconciliationStatus.record);
-                    }
-                    onClose();
-                  }}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono"
-                >
-                  Accept & View Verified Record
-                </Button>
+              {reconciliationStatus.details && (
+                <p className="text-[10px] text-zinc-400 leading-relaxed font-mono bg-zinc-900/60 p-2 rounded border border-zinc-800">
+                  {reconciliationStatus.details}
+                </p>
+              )}
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                {reconciliationStatus.matchedRecord && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      if (reconciliationStatus.matchedRecord) {
+                        await onVerificationSuccess(reconciliationStatus.matchedRecord);
+                      }
+                      onClose();
+                    }}
+                    className="text-xs font-mono text-zinc-300 border-zinc-700 hover:bg-zinc-800"
+                  >
+                    Accept & View Possible Match
+                  </Button>
+                )}
               </div>
+              <label className="flex items-start gap-2 pt-2 border-t border-amber-800/50 cursor-pointer text-amber-200">
+                <input
+                  type="checkbox"
+                  checked={duplicateRiskAcknowledged}
+                  onChange={(e) => setDuplicateRiskAcknowledged(e.target.checked)}
+                  className="mt-0.5 rounded border-amber-600 bg-zinc-900 text-amber-500 focus:ring-amber-500"
+                />
+                <span className="text-[11px] font-mono leading-tight">
+                  I have reviewed the server history above and understand that resubmitting carries a risk of creating a duplicate verification record.
+                </span>
+              </label>
             </div>
           )}
 
-          {/* Reconciliation Status: Confirmed not found -> cleared to submit */}
-          {reconciliationStatus?.type === 'not_found' && (
+          {/* Reconciliation Status: No Match in Inspected Window */}
+          {reconciliationStatus?.type === 'no_match_in_window' && (
             <div
               role="status"
-              className="p-3 bg-blue-950/60 border border-blue-600/70 rounded-md text-blue-200 text-xs space-y-1 font-mono text-[11px]"
+              className="p-3.5 bg-blue-950/60 border border-blue-600/70 rounded-md text-blue-200 text-xs space-y-2.5 font-mono text-[11px]"
             >
               <div className="flex items-center gap-1.5 font-bold text-blue-300">
-                <Check className="w-4 h-4 text-blue-400" />
-                History Checked — Ready for Submission
+                <Info className="w-4 h-4 text-blue-400 shrink-0" />
+                {reconciliationStatus.title}
               </div>
               <p className="leading-relaxed">{reconciliationStatus.message}</p>
+              {reconciliationStatus.details && (
+                <p className="text-[10px] text-zinc-400 leading-relaxed bg-zinc-900/60 p-2 rounded border border-zinc-800">
+                  {reconciliationStatus.details}
+                </p>
+              )}
+              <label className="flex items-start gap-2 pt-2 border-t border-blue-800/50 cursor-pointer text-blue-200">
+                <input
+                  type="checkbox"
+                  checked={duplicateRiskAcknowledged}
+                  onChange={(e) => setDuplicateRiskAcknowledged(e.target.checked)}
+                  className="mt-0.5 rounded border-blue-500 bg-zinc-900 text-blue-500 focus:ring-blue-500"
+                />
+                <span className="text-[11px] font-mono leading-tight">
+                  I have reviewed the server history above and understand that resubmitting carries a risk of creating a duplicate verification record.
+                </span>
+              </label>
+            </div>
+          )}
+
+          {/* Reconciliation Status: Error */}
+          {reconciliationStatus?.type === 'error' && (
+            <div
+              role="alert"
+              className="p-3 bg-red-950/60 border border-red-700/80 rounded-md text-red-200 text-xs space-y-1.5"
+            >
+              <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-red-300">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                {reconciliationStatus.title}
+              </div>
+              <p className="leading-relaxed font-mono text-[11px]">
+                {reconciliationStatus.message}
+              </p>
+              {reconciliationStatus.details && (
+                <p className="text-[10px] text-zinc-400 font-mono">
+                  {reconciliationStatus.details}
+                </p>
+              )}
+              <label className="flex items-start gap-2 pt-2 border-t border-red-800/50 cursor-pointer text-red-200">
+                <input
+                  type="checkbox"
+                  checked={duplicateRiskAcknowledged}
+                  onChange={(e) => setDuplicateRiskAcknowledged(e.target.checked)}
+                  className="mt-0.5 rounded border-red-600 bg-zinc-900 text-red-500 focus:ring-red-500"
+                />
+                <span className="text-[11px] font-mono leading-tight">
+                  I understand that history read failed and resubmitting carries a risk of creating a duplicate record.
+                </span>
+              </label>
             </div>
           )}
 
           {/* Uncertain Network Warning Banner with Safe Reconciliation Action */}
-          {networkUncertainWarning && reconciliationStatus?.type !== 'found' && (
+          {networkUncertainWarning && (
             <div
               role="alert"
               className="p-3.5 bg-amber-950/60 border border-amber-600/80 rounded-md text-amber-200 text-xs space-y-2"
@@ -415,8 +505,8 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
                 Transmission Outcome Uncertain — Re-submission Locked
               </div>
               <p className="leading-relaxed font-mono text-[11px]">
-                A network glitch occurred during save. Your draft is preserved below. Blind duplicate re-submission
-                is locked to prevent phantom records. Please check the server&apos;s authoritative history before retrying.
+                A network interruption occurred during save. Your draft is preserved below. Blind duplicate re-submission
+                is locked to prevent duplicate records. Please check the server&apos;s authoritative history before retrying.
               </p>
               <div className="pt-1">
                 <Button
@@ -699,10 +789,16 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
 
           {/* Action Buttons */}
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-800">
-            {isBlindResubmitBlocked && (
+            {isBlindResubmitBlocked && !duplicateRiskAcknowledged && (
               <span className="text-[11px] font-mono text-amber-400 mr-auto flex items-center gap-1.5">
                 <Lock className="w-3.5 h-3.5 shrink-0" />
-                Re-submission locked pending reconciliation
+                Re-submission locked pending duplicate risk acknowledgment
+              </span>
+            )}
+            {isBlindResubmitBlocked && duplicateRiskAcknowledged && (
+              <span className="text-[11px] font-mono text-blue-400 mr-auto flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5 shrink-0" />
+                Duplicate risk acknowledged by operator
               </span>
             )}
             <Button
@@ -718,8 +814,17 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
               type="submit"
               variant="primary"
               size="sm"
-              disabled={isSubmitting || previewMode || isBlindResubmitBlocked || isCheckingHistory}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white"
+              disabled={
+                isSubmitting ||
+                previewMode ||
+                (isBlindResubmitBlocked && !duplicateRiskAcknowledged) ||
+                isCheckingHistory
+              }
+              className={`flex items-center gap-1.5 text-white ${
+                isBlindResubmitBlocked && duplicateRiskAcknowledged
+                  ? 'bg-amber-600 hover:bg-amber-500'
+                  : 'bg-emerald-600 hover:bg-emerald-500'
+              }`}
             >
               {isSubmitting ? (
                 <>
@@ -730,6 +835,11 @@ export const RecordVerificationModal: React.FC<RecordVerificationModalProps> = (
                 <>
                   <Clock className="w-4 h-4 animate-spin" />
                   Checking History...
+                </>
+              ) : isBlindResubmitBlocked && duplicateRiskAcknowledged ? (
+                <>
+                  <RotateCcw className="w-4 h-4" />
+                  Submit Verification (Acknowledged Retry)
                 </>
               ) : (
                 <>

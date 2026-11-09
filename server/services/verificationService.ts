@@ -14,8 +14,11 @@ export interface CreateVerificationResult {
     lastVerifiedAt: Date | null;
     lastVerifiedYearMonth: string | null;
     lastVerificationOutcome: VerificationOutcome | null;
+    isAmbiguous?: boolean;
+    conflictingYearMonth?: string;
   };
   summaryChanged: boolean;
+  isAmbiguous?: boolean;
 }
 
 export interface VerificationListResult {
@@ -26,56 +29,15 @@ export interface VerificationListResult {
   totalPages: number;
 }
 
-/**
- * Deterministic chronological comparator for physical verification observations.
- * Orders verifications descending (newest first).
- *
- * Rules:
- * 1. verifiedYear: greater is strictly newer.
- * 2. verifiedMonth: greater is strictly newer.
- * 3. Within same year & month:
- *    - If both have verifiedDay (DAY precision): greater day is newer.
- *    - If comparing DAY and MONTH within the same month, we explicitly avoid inventing a calendar day
- *      (e.g. neither assuming day 1 nor day 31). The later recorded inspection (createdAt) serves as
- *      authoritative tie-breaker, with immutable record ID as the final deterministic fallback.
- * 4. When a MONTH-precision observation is the authoritative latest record, lastVerifiedAt is set to null
- *    to prevent contradictory older timestamps next to a newer month-only summary.
- */
-export function compareVerificationChronology(
-  a: {
-    verifiedYear: number;
-    verifiedMonth: number;
-    verifiedDay: number | null;
-    datePrecision: DatePrecision;
-    createdAt: Date;
-    id: string;
-  },
-  b: {
-    verifiedYear: number;
-    verifiedMonth: number;
-    verifiedDay: number | null;
-    datePrecision: DatePrecision;
-    createdAt: Date;
-    id: string;
-  }
-): number {
-  if (b.verifiedYear !== a.verifiedYear) {
-    return b.verifiedYear - a.verifiedYear;
-  }
-  if (b.verifiedMonth !== a.verifiedMonth) {
-    return b.verifiedMonth - a.verifiedMonth;
-  }
-  if (a.verifiedDay !== null && b.verifiedDay !== null) {
-    if (b.verifiedDay !== a.verifiedDay) {
-      return b.verifiedDay - a.verifiedDay;
-    }
-  }
-  const timeDiff = b.createdAt.getTime() - a.createdAt.getTime();
-  if (timeDiff !== 0) {
-    return timeDiff;
-  }
-  return b.id.localeCompare(a.id);
-}
+export {
+  type VerificationConflictCandidate,
+  type VerificationChronologyEvaluation,
+  compareVerificationChronology,
+  evaluateVerificationChronology,
+} from '../../src/utils/verificationEvaluation.ts';
+import {
+  evaluateVerificationChronology,
+} from '../../src/utils/verificationEvaluation.ts';
 
 /**
  * Detects whether a database error represents a recognized PostgreSQL serialization failure
@@ -125,15 +87,9 @@ export const verificationService = {
       try {
         return await prisma.$transaction(
           async (tx) => {
-            // Per-asset row-level write lock in PostgreSQL to eliminate concurrency races
-            try {
-              await tx.$queryRaw`SELECT "id" FROM "assets" WHERE "id" = ${assetId}::uuid FOR UPDATE`;
-            } catch (rawErr: any) {
-              // In unit tests with mock DB or non-postgres runtime, safely handle raw query if not a serialization error
-              if (isSerializationFailure(rawErr)) {
-                throw rawErr;
-              }
-            }
+            // Per-asset row-level write lock in PostgreSQL to eliminate concurrency races (Fail-closed).
+            // Any failed lock or unexpected query error MUST abort the transaction and roll back.
+            await tx.$queryRaw`SELECT "id" FROM "assets" WHERE "id" = ${assetId}::uuid FOR UPDATE`;
 
             // 1. Validate target asset exists and fetch current verification summary
             const currentAsset = await tx.asset.findUnique({
@@ -191,28 +147,39 @@ export const verificationService = {
                 verifiedDay: true,
                 verifiedDate: true,
                 verifiedYearMonth: true,
+                verifiedBy: true,
                 createdAt: true,
+                notes: true,
               },
             });
 
             let targetLastVerifiedAt: Date | null = null;
             let targetLastVerifiedYearMonth: string | null = null;
             let targetLastVerificationOutcome: VerificationOutcome | null = null;
+            let isAmbiguous = false;
 
             if (qualifyingAttempts.length > 0) {
-              // Sort descending using our deterministic chronology comparator
-              qualifyingAttempts.sort(compareVerificationChronology);
-              const latest = qualifyingAttempts[0];
+              const evalResult = evaluateVerificationChronology(qualifyingAttempts);
 
-              targetLastVerifiedYearMonth = latest.verifiedYearMonth;
-              targetLastVerificationOutcome = latest.outcome;
-
-              if (latest.datePrecision === DatePrecision.DAY) {
-                targetLastVerifiedAt = latest.verifiedDate;
-              } else {
-                // MONTH precision: verifiedDay is null. Setting lastVerifiedAt to null prevents
-                // leaving a contradictory older day/timestamp next to a newer month-only summary.
+              if (evalResult.isAmbiguous) {
+                // Policy P11-D01: Mixed same-month DAY/MONTH observations require operator resolution.
+                // Do NOT choose between them using createdAt or invented days.
+                isAmbiguous = true;
+                targetLastVerifiedYearMonth = evalResult.conflictingYearMonth || null;
                 targetLastVerifiedAt = null;
+                targetLastVerificationOutcome = null;
+              } else if (evalResult.authoritativeRecord) {
+                const latest = evalResult.authoritativeRecord;
+                targetLastVerifiedYearMonth = latest.verifiedYearMonth ?? null;
+                targetLastVerificationOutcome = (latest.outcome as VerificationOutcome) ?? null;
+
+                if (latest.datePrecision === DatePrecision.DAY) {
+                  targetLastVerifiedAt = latest.verifiedDate ?? null;
+                } else {
+                  // MONTH precision: verifiedDay is null. Setting lastVerifiedAt to null prevents
+                  // leaving a contradictory older day/timestamp next to a newer month-only summary.
+                  targetLastVerifiedAt = null;
+                }
               }
             }
 
@@ -280,8 +247,11 @@ export const verificationService = {
                 lastVerifiedAt: targetLastVerifiedAt,
                 lastVerifiedYearMonth: targetLastVerifiedYearMonth,
                 lastVerificationOutcome: targetLastVerificationOutcome,
+                isAmbiguous,
+                conflictingYearMonth: isAmbiguous ? (targetLastVerifiedYearMonth ?? undefined) : undefined,
               },
               summaryChanged,
+              isAmbiguous,
             };
           },
           {
