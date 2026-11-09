@@ -494,11 +494,16 @@ Phase P11 implements an auditable per-asset Physical Verification workflow under
    - `isSuccessful` represents whether the physical inspection attempt was successfully carried out to completion.
    - **Critical:** Documenting a physical mismatch (`LOCATION_MISMATCH`, `USER_MISMATCH`, `STATUS_MISMATCH`) or defect (`DAMAGED`) is a completed, successful inspection (`isSuccessful: true`, the default).
    - `isSuccessful: false` is reserved for inspection attempts that could not be completed (e.g. equipment locked in inaccessible room, site visit aborted).
-3. **Latest Verification Summary Policy & Deterministic Chronology:**
+3. **Latest Verification Summary Policy & Policy P11-D01 (Ambiguity Resolution):**
    - Only completed inspections (`isSuccessful: true`) qualify to update the `Asset` latest verification summary (`lastVerifiedAt`, `lastVerifiedYearMonth`, `lastVerificationOutcome`).
    - Unsuccessful attempts (`isSuccessful: false`) and backdated observations do NOT regress or overwrite a newer confirmed summary.
    - When the latest confirmed observation is `MONTH` precision, `lastVerifiedAt` is explicitly set to `null` to avoid leaving a contradictory older day/timestamp next to a newer month-only summary.
-   - Chronology ordering comparator (`compareVerificationChronology`): Orders primarily by `verifiedYear` DESC, `verifiedMonth` DESC, `verifiedDay` DESC (when both DAY). If comparing DAY and MONTH within the exact same month, observation recording order (`createdAt` DESC, `id` DESC) serves as the deterministic tie-breaker without inventing a calendar day.
+   - **Chronology & Ambiguity Rules (Policy P11-D01):**
+     - Year/month ordering across different calendar months is strictly chronological (`2026-11` is strictly newer than `2026-10`).
+     - Same-month records of matching precision compare deterministically (DAY records compare by `verifiedDay` DESC; MONTH records share identical observation precision).
+     - **Mixed Precision in Same Month:** When qualifying `DAY` and `MONTH` observations occur in the exact same calendar month, the system does NOT synthesize a calendar day (neither Day 1 nor Day 31) and does NOT use registration time (`createdAt`) as authoritative observation ordering.
+     - Mixed precision is classified as ambiguous under approved Policy P11-D01 (`MIXED_PRECISION_CONFLICT`). Ambiguity is evaluated via bounded server queries (`GET /api/assets/:assetId/verifications/evaluation`) and requires explicit operator resolution.
+     - **Schema Approval Gate:** Selection persistence requires additive schema changes (`PhysicalVerificationResolution`), which remain BLOCKED pending explicit database owner approval.
 4. **Append-Only Immutability & Audit Atomicity:**
    - Physical verification records are append-only rows in `PhysicalVerification`.
    - In one atomic Prisma transaction: the verification record is created, eligible summary cache updated, and an `AssetAuditEvent` with action `'PHYSICAL_VERIFICATION'` and full before/after snapshots is recorded.
@@ -516,54 +521,57 @@ Run the full automated test suite:
 npm run test
 ```
 
-### Automated Check Suites (149 Tests Passing):
-1. `test/p11-rework-verification-refresh.test.ts`: **(P11-REWORK)** Verifies `fetchVerificationHistory` typed error handling (HTTP 500, network error, malformed JSON, and HTTP 200 success), `executeAuthoritativeRefresh` with verifications (partial failure detection on verification history 500, network error handling), `evaluatePostMutationRefresh` for physical verification (`Saved on server; refresh not verified` with actionable failing source), strictly read-only retry refresh reconciling all 4 data sources, uncertain POST draft retention and resubmission locking pending reconciliation, `isSerializationFailure` recognition of PostgreSQL (40001, 40P01) and Prisma (P2034) write conflicts, MONTH-null-day invariants, and same-month mixed-precision policy documentation.
-2. `test/physical-verification.test.ts`: **(P11)** Verifies physical verification payload validation, rejection of forbidden asset/actor fields, all 6 `VerificationOutcome` enum values, `isSuccessful` semantics, calendar date validation with leap years and impossible dates, `MONTH` null-day invariant, `DAY` timezone-neutral dates, bounded pagination query validation (max 100), deterministic chronology comparator, schema and migration invariants, unauthenticated 401 protection, CSRF token enforcement (403), malformed UUID rejection (400), and general PATCH immutability.
-3. `test/post-mutation-refresh.test.ts`: **(P10 & P10-REWORK)** Verifies post-mutation refresh for transfer mutations, unverified refresh state detection, partial read failure isolation, and guard logic.
-4. `test/transfer-workflow.test.ts`: **(P10 & P10-REWORK)** Verifies transfer payload validation, rejection of forbidden asset/actor fields, single and multi-dimension support with nullable unassign, mandatory non-empty eForm on completion, non-unique eForm index invariant, additive partial unique index migration SQL, pagination query validation, truthful transferStatus cancellation audit, status-guarded concurrency updates, unauthenticated 401 protection, and UUID validation.
-5. `test/asset-inline-editing.test.ts`: **(P09)** Verifies 9-field general allowlist, strict rejection of reserved assignment/verification fields (P10/P11), `computePatchDelta` changed-field-only payloads, blank-to-null normalization, no-op write suppression, client-side validation rules, and backend UUID enforcement.
-6. `test/asset-grid-ui.test.ts`: **(P08)** Verifies Grid URL search/filter serialization, defensive deserialization, and column default visibility rules.
-7. `test/asset-list-endpoints.test.ts`: **(P08)** Verifies `GET /api/assets` requireAdmin authentication (401), query preservation, and read-only CSRF exemption.
-8. `test/asset-list-validation.test.ts`: **(P08)** Verifies pagination bounds (1–100), sort allowlists, direction validation, global search trimming (max 100), quick filter shortcuts, filter AST validation (depth <= 2, rules <= 20), and Prisma parameterized `where` and `orderBy` builders.
-9. `test/asset-details-editing.test.ts`: **(P07)** Verifies 9-field general patch allowlist, forbidden field rejection, client validation, no-op detection, NULL normalization, and `/assets/:uuid` route matching.
-10. `test/lookup-client.test.ts`: **(P06)** Verifies `DeviceHealth.name` mapping, complete success, partial catalog failure isolation, pre-existing state retention, and truthful 401/403 status distinction.
-11. `test/asset-form-validation.test.ts`: **(P06)** Verifies model requirement, optional UUID formatting, empty string to NULL normalization (no "N/A" synthesis), and distinct AC Owner vs Current User preservation.
-12. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items, path bindings, and rejection of unapproved screenshot-only navigation items.
-13. `test/asset-validation.test.ts`: **(P04)** Create and Patch input validation, RFC 4122 UUID verification, forbidden field rejection (P10/P11), immutable ID protection, empty identifier NULL normalization.
-14. `test/asset-endpoints.test.ts`: **(P04)** Route authentication (401), DELETE method rejection (405), unauthenticated lookup blockage, health check preservation.
-15. `test/asset-audit-service.test.ts`: **(P04)** Error classes (`DuplicateIdentifierError`, `AssetNotFoundError`), transactional audit rollback logic, integration checks.
-16. `test/auth-password.test.ts`: **(P03)** Argon2id hash formatting, candidate verification, username and password strength validation.
-17. `test/auth-bootstrap.test.ts`: **(P03)** Password strength enforcement, username validation, single-admin duplicate rejection.
-18. `test/auth-endpoints.test.ts`: **(P03)** Health check preservation, registration blockage (404), `/api/auth/me` protection (401), CSRF generation, login input validation, logout cookie clearing, CSRF origin blockage, and account lockout calculation.
-19. `test/database-schema.test.ts`: **(P02)** All P02 PostgreSQL constraints, models, relations, check constraints, and indexes.
-20. `test/health.test.ts`: **(P01)** Backend diagnostic health check and server configuration defaults.
+### Automated Check Suites:
+1. `test/p11-final-correction.test.ts`: **(P11-FINAL)** Verifies fail-closed lock classification (`isSerializationFailure`), unexpected error immediate abort, bounded serialization retries, typed post-mutation verification error handling, fail-closed evaluation status tracking (`IDLE`, `LOADING`, `VERIFIED`, `UNVERIFIED`, `ERROR`), bounded server-authoritative evaluation queries, candidate pagination bounds (max 100/page), candidate fingerprint (SHA-256) concurrency token, verdict independence from candidate page selection, read-only possible-match review without fake 201 callbacks, and full-dataset ambiguity discovery.
+2. `test/p11-rework-verification-refresh.test.ts`: **(P11-REWORK)** Verifies `fetchVerificationHistory` typed error handling, `executeAuthoritativeRefresh`, `evaluatePostMutationRefresh`, strictly read-only retry refresh, uncertain POST draft retention, and MONTH-null-day invariants.
+3. `test/physical-verification.test.ts`: **(P11)** Verifies physical verification payload validation, rejection of forbidden asset/actor fields, all 6 `VerificationOutcome` enum values, `isSuccessful` semantics, calendar date validation with leap years, `MONTH` null-day invariant, `DAY` timezone-neutral dates, bounded pagination query validation, schema and migration invariants, unauthenticated 401 protection, CSRF token enforcement (403), malformed UUID rejection (400), and general PATCH immutability.
+4. `test/post-mutation-refresh.test.ts`: **(P10 & P10-REWORK)** Verifies post-mutation refresh for transfer mutations.
+5. `test/transfer-workflow.test.ts`: **(P10 & P10-REWORK)** Verifies transfer workflow, constraints, audits, and partial unique index.
+6. `test/asset-inline-editing.test.ts`: **(P09)** Verifies 9-field general allowlist.
+7. `test/asset-grid-ui.test.ts`: **(P08)** Verifies Grid URL serialization and column defaults.
+8. `test/asset-list-endpoints.test.ts`: **(P08)** Verifies `GET /api/assets` requireAdmin authentication (401).
+9. `test/asset-list-validation.test.ts`: **(P08)** Verifies pagination bounds and filter AST validation.
+10. `test/asset-details-editing.test.ts`: **(P07)** Verifies 9-field general patch allowlist.
+11. `test/lookup-client.test.ts`: **(P06)** Verifies `DeviceHealth.name` mapping.
+12. `test/asset-form-validation.test.ts`: **(P06)** Verifies model requirement and empty string to NULL normalization.
+13. `test/design-system-navigation.test.ts`: **(P05)** Verifies exactly the 6 approved navigation items.
+14. `test/asset-validation.test.ts`: **(P04)** Create and Patch input validation.
+15. `test/asset-endpoints.test.ts`: **(P04)** Route authentication (401).
+16. `test/asset-audit-service.test.ts`: **(P04)** Error classes and transactional audit rollback.
+17. `test/auth-password.test.ts`: **(P03)** Argon2id hash formatting.
+18. `test/auth-bootstrap.test.ts`: **(P03)** Single-admin bootstrap.
+19. `test/auth-endpoints.test.ts`: **(P03)** CSRF, login, and lockout.
+20. `test/database-schema.test.ts`: **(P02)** PostgreSQL constraints and models.
+21. `test/health.test.ts`: **(P01)** Backend diagnostic health check.
 
 ### Concurrency Testing Notice (PostgreSQL Runtime Verification):
-- **Unit and Transaction Contract Tests:** PASS (149/149 automated assertions verified via `tsx --test`).
+- **Unit and Transaction Contract Tests:** PASS (automated assertions verified via `tsx --test`).
 - **Live Multi-Client Concurrency Integration:** Marked **NOT VERIFIED** in ephemeral container environments where no active, persistent PostgreSQL instance is running. The implementation enforces PostgreSQL `SERIALIZABLE` isolation with bounded retry of recognized serialization failures (`40001`, `40P01`, `P2034`) and per-asset row locks (`SELECT ... FOR UPDATE`). True multi-process database race verification requires a live PostgreSQL instance with concurrent connections.
 
 ---
 
 ## 12. Policy Decisions & Domain Boundaries
 
-### OPEN DECISION / BLOCKED FOR POLICY APPROVAL: Same-Month Mixed-Precision Chronology Ordering
-When comparing a `DAY`-precision verification (e.g. 2026-11-15) and a `MONTH`-precision verification in the same month (e.g. 2026-11 without day), the true real-world observation ordering is mathematically ambiguous without domain policy:
-- **Current Technical Implementation:** Uses `createdAt` (system transaction registration timestamp) as the deterministic tie-breaker, without fabricating synthetic calendar days (neither Day 1 nor Day 30/31).
-- **Status:** **OPEN DECISION / BLOCKED FOR POLICY APPROVAL**. This is an interim technical tie-breaker, NOT a confirmed real observation-date domain rule.
-- **Alternatives for User / Stakeholder Approval:**
-  - **Alternative A (Conservative Start):** Treat month-only observations as occurring at the beginning of the month (effectively Day 1 for ordering only, without inventing a false day field).
-  - **Alternative B (Conservative End):** Treat month-only observations as occurring at the end of the month (effectively Day 28–31 for ordering only).
-  - **Alternative C (Registration Order - Current Baseline):** Order by system registration timestamp (`createdAt`), treating later-entered observations as authoritative.
-  - **Alternative D (Explicit Operator Resolution):** Require operator prompt / flag when mixed-precision observations conflict in the same month.
+### APPROVED BUSINESS POLICY: P11-D01 — Explicit Operator Resolution (Option D)
+- **Approved Domain Rule:** When eligible successful physical verifications of both `DAY` and `MONTH` precision exist in the same calendar month, the system MUST NOT choose between them using `createdAt`, synthetic day 1 / day 31, or implicit tie-breakers.
+- **Implemented Scope (Detection & Evaluation):**
+  - Evaluates mixed precision via bounded server queries (`GET /api/assets/:assetId/verifications/evaluation`).
+  - Identifies ambiguity, computes candidate set fingerprint (SHA-256), exposes paginated candidates (max 100/page), and highlights ambiguous status in the Asset Details UI.
+  - UI displays resolution-required banner with candidate IDs, precision, dates, operators, and timestamps.
+- **Schema Approval Gate (Persistence BLOCKED):**
+  - Durable persistence of the operator's authoritative selection is **NOT IMPLEMENTED / BLOCKED** pending explicit database schema and migration approval by the system owner.
+  - A proposed additive Prisma model (`PhysicalVerificationResolution`) and migration SQL are documented in the project plan for owner review.
+  - No database migration or write-path implementation will occur without separate explicit authorization.
 
 ### Strictly Excluded in Phase P11 & P11-REWORK
 - **No Bulk Verification Actions:** Verification remains strictly per-asset on `/assets/:id`.
 - **No Excel Import/Export:** Ingestion and export of spreadsheets belong to Phase P12.
 - **No Automated Status Mutations:** Physical verification documents mismatches without mutating asset status, location, or owner.
 - **No Seventh Navigation Item:** Navigation remains strictly bounded to exactly 6 items.
+- **No Unapproved Schema Migrations:** All P11-D01 persistence tables/columns are held at the schema approval gate.
 
 ### Handoff to Phase P12 (Excel Import / Ingestion)
-- Robust, reliable `AssetDetailsView` with integrated Physical Verification summary card (DAY vs MONTH precision), Record Physical Verification modal with uncertain POST recovery and blind resubmission locking, and paginated verification timeline with actionable error handling.
+- Robust, reliable `AssetDetailsView` with integrated Physical Verification summary card (DAY vs MONTH precision), Record Physical Verification modal with uncertain POST recovery and blind resubmission locking, bounded server-authoritative evaluation endpoint, and paginated verification timeline with actionable error handling.
 - Concurrency-safe verification service with SERIALIZABLE isolation, bounded retry for write conflicts, and atomic audit logging.
 - Ready for Phase P12: Excel spreadsheet file upload, column mapping, dry-run validation, and batch ingestion.
 

@@ -29,6 +29,42 @@ export interface VerificationListResult {
   totalPages: number;
 }
 
+export interface VerificationEvaluationQuery {
+  candidatePage?: number;
+  candidateLimit?: number;
+}
+
+export interface BoundedVerificationEvaluationResult {
+  isAmbiguous: boolean;
+  ambiguityReason: string | null;
+  conflictingYearMonth: string | null;
+  authoritativeRecord?: PhysicalVerification | null;
+  candidates: Array<{
+    id: string;
+    outcome: VerificationOutcome;
+    datePrecision: DatePrecision;
+    verifiedYear: number;
+    verifiedMonth: number;
+    verifiedDay: number | null;
+    verifiedDate: Date | null;
+    verifiedYearMonth: string | null;
+    verifiedBy: string;
+    createdAt: Date;
+    notes: string | null;
+  }>;
+  candidatePagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  candidateFingerprint: string | null;
+  totalQualifyingRecords: number;
+  dayCountInLatestMonth: number;
+  monthCountInLatestMonth: number;
+  evaluatedAt: string;
+}
+
 export {
   type VerificationConflictCandidate,
   type VerificationChronologyEvaluation,
@@ -314,11 +350,16 @@ export const verificationService = {
   },
 
   /**
-   * Evaluates chronological precedence and mixed-precision ambiguity (Policy P11-D01)
-   * across ALL qualifying (isSuccessful=true) records for an asset on the server.
-   * Guarantees bounded response presentation without unbounded client-side pagination loading.
+   * Scalable server-authoritative evaluation (Policy P11-D01):
+   * 1. Bounded query to find the latest eligible observation year/month.
+   * 2. Bounded count aggregates to check whether both DAY and MONTH precisions occur in that latest month.
+   * 3. Deterministic candidate pagination (max 100/page) that never affects the conflict verdict.
+   * 4. Candidate set fingerprint (SHA-256) for optimistic concurrency / stale checks.
    */
-  async getVerificationEvaluation(assetId: string) {
+  async getVerificationEvaluation(
+    assetId: string,
+    query?: VerificationEvaluationQuery
+  ): Promise<BoundedVerificationEvaluationResult> {
     const assetExists = await prisma.asset.findUnique({
       where: { id: assetId },
       select: { id: true },
@@ -328,7 +369,11 @@ export const verificationService = {
       throw new AssetNotFoundError(assetId);
     }
 
-    const qualifyingRecords = await prisma.physicalVerification.findMany({
+    const candidatePage = Math.max(1, query?.candidatePage || 1);
+    const candidateLimit = Math.min(Math.max(1, query?.candidateLimit || 10), 100);
+
+    // 1. Determine latest qualifying observation year and month (Bounded: 1 row)
+    const latestRecord = await prisma.physicalVerification.findFirst({
       where: {
         assetId,
         isSuccessful: true,
@@ -338,6 +383,144 @@ export const verificationService = {
         { verifiedMonth: 'desc' },
         { createdAt: 'desc' },
       ],
+      select: {
+        verifiedYear: true,
+        verifiedMonth: true,
+        verifiedYearMonth: true,
+      },
+    });
+
+    if (!latestRecord) {
+      return {
+        isAmbiguous: false,
+        ambiguityReason: null,
+        conflictingYearMonth: null,
+        authoritativeRecord: null,
+        candidates: [],
+        candidatePagination: {
+          page: 1,
+          limit: candidateLimit,
+          total: 0,
+          totalPages: 1,
+        },
+        candidateFingerprint: null,
+        totalQualifyingRecords: 0,
+        dayCountInLatestMonth: 0,
+        monthCountInLatestMonth: 0,
+        evaluatedAt: new Date().toISOString(),
+      };
+    }
+
+    const latestYear = latestRecord.verifiedYear;
+    const latestMonth = latestRecord.verifiedMonth;
+    const latestYearMonth =
+      latestRecord.verifiedYearMonth ||
+      `${latestYear}-${String(latestMonth).padStart(2, '0')}`;
+
+    // 2. Count aggregates for precisions in latest observation period & total qualifying
+    const [dayCount, monthCount, totalQualifyingRecords] = await Promise.all([
+      prisma.physicalVerification.count({
+        where: {
+          assetId,
+          isSuccessful: true,
+          verifiedYear: latestYear,
+          verifiedMonth: latestMonth,
+          datePrecision: DatePrecision.DAY,
+        },
+      }),
+      prisma.physicalVerification.count({
+        where: {
+          assetId,
+          isSuccessful: true,
+          verifiedYear: latestYear,
+          verifiedMonth: latestMonth,
+          datePrecision: DatePrecision.MONTH,
+        },
+      }),
+      prisma.physicalVerification.count({
+        where: {
+          assetId,
+          isSuccessful: true,
+        },
+      }),
+    ]);
+
+    const isAmbiguous = dayCount > 0 && monthCount > 0;
+
+    // 3. If no ambiguity, single authoritative latest winner
+    if (!isAmbiguous) {
+      let authRecord: PhysicalVerification | null = null;
+      if (dayCount > 0) {
+        authRecord = await prisma.physicalVerification.findFirst({
+          where: {
+            assetId,
+            isSuccessful: true,
+            verifiedYear: latestYear,
+            verifiedMonth: latestMonth,
+            datePrecision: DatePrecision.DAY,
+          },
+          orderBy: [
+            { verifiedDay: 'desc' },
+            { createdAt: 'desc' },
+            { id: 'desc' },
+          ],
+        });
+      } else if (monthCount > 0) {
+        authRecord = await prisma.physicalVerification.findFirst({
+          where: {
+            assetId,
+            isSuccessful: true,
+            verifiedYear: latestYear,
+            verifiedMonth: latestMonth,
+            datePrecision: DatePrecision.MONTH,
+          },
+          orderBy: [
+            { createdAt: 'desc' },
+            { id: 'desc' },
+          ],
+        });
+      }
+
+      return {
+        isAmbiguous: false,
+        ambiguityReason: null,
+        conflictingYearMonth: null,
+        authoritativeRecord: authRecord,
+        candidates: [],
+        candidatePagination: {
+          page: 1,
+          limit: candidateLimit,
+          total: 0,
+          totalPages: 1,
+        },
+        candidateFingerprint: null,
+        totalQualifyingRecords,
+        dayCountInLatestMonth: dayCount,
+        monthCountInLatestMonth: monthCount,
+        evaluatedAt: new Date().toISOString(),
+      };
+    }
+
+    // 4. If ambiguous (mixed DAY & MONTH in latest month):
+    const totalCandidates = dayCount + monthCount;
+    const skip = (candidatePage - 1) * candidateLimit;
+
+    // Paginated candidate records for the conflicting month
+    const candidates = await prisma.physicalVerification.findMany({
+      where: {
+        assetId,
+        isSuccessful: true,
+        verifiedYear: latestYear,
+        verifiedMonth: latestMonth,
+      },
+      orderBy: [
+        { datePrecision: 'asc' }, // DAY first, then MONTH
+        { verifiedDay: 'desc' },
+        { createdAt: 'desc' },
+        { id: 'desc' },
+      ],
+      skip,
+      take: candidateLimit,
       select: {
         id: true,
         outcome: true,
@@ -353,11 +536,43 @@ export const verificationService = {
       },
     });
 
-    const evaluation = evaluateVerificationChronology(qualifyingRecords);
+    // Compute candidate fingerprint from all candidate keys in this conflicting month
+    const allCandidateKeys = await prisma.physicalVerification.findMany({
+      where: {
+        assetId,
+        isSuccessful: true,
+        verifiedYear: latestYear,
+        verifiedMonth: latestMonth,
+      },
+      orderBy: [{ id: 'asc' }],
+      select: { id: true, createdAt: true },
+    });
+
+    const candidateFingerprint = crypto
+      .createHash('sha256')
+      .update(
+        allCandidateKeys
+          .map((c) => `${c.id}:${c.createdAt.toISOString()}`)
+          .join('|')
+      )
+      .digest('hex');
 
     return {
-      ...evaluation,
-      totalQualifyingRecords: qualifyingRecords.length,
+      isAmbiguous: true,
+      ambiguityReason: 'MIXED_PRECISION_CONFLICT',
+      conflictingYearMonth: latestYearMonth,
+      authoritativeRecord: null,
+      candidates,
+      candidatePagination: {
+        page: candidatePage,
+        limit: candidateLimit,
+        total: totalCandidates,
+        totalPages: Math.ceil(totalCandidates / candidateLimit) || 1,
+      },
+      candidateFingerprint,
+      totalQualifyingRecords,
+      dayCountInLatestMonth: dayCount,
+      monthCountInLatestMonth: monthCount,
       evaluatedAt: new Date().toISOString(),
     };
   },

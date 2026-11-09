@@ -31,8 +31,43 @@ verificationRouter.get('/evaluation', async (req: Request, res: Response) => {
     return;
   }
 
+  // Validate candidate pagination query parameters (max 100)
+  const rawPage = req.query.page ?? req.query.candidatePage;
+  const rawLimit = req.query.limit ?? req.query.candidateLimit;
+  let candidatePage = 1;
+  let candidateLimit = 10;
+
+  if (rawPage !== undefined) {
+    const parsedPage = Number(rawPage);
+    if (!Number.isInteger(parsedPage) || parsedPage < 1) {
+      res.status(400).json({
+        status: 'error',
+        error: 'Candidate pagination parameter "page" must be a positive integer >= 1.',
+        field: 'page',
+      });
+      return;
+    }
+    candidatePage = parsedPage;
+  }
+
+  if (rawLimit !== undefined) {
+    const parsedLimit = Number(rawLimit);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
+      res.status(400).json({
+        status: 'error',
+        error: 'Candidate pagination parameter "limit" must be an integer between 1 and 100.',
+        field: 'limit',
+      });
+      return;
+    }
+    candidateLimit = parsedLimit;
+  }
+
   try {
-    const evaluation = await verificationService.getVerificationEvaluation(assetId);
+    const evaluation = await verificationService.getVerificationEvaluation(assetId, {
+      candidatePage,
+      candidateLimit,
+    });
     res.status(200).json({
       status: 'ok',
       data: evaluation,

@@ -138,72 +138,76 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
   const [isRecordVerificationOpen, setIsRecordVerificationOpen] = useState(false);
 
   // Server-authoritative conflict evaluation state (Policy P11-D01)
-  const [serverEvaluation, setServerEvaluation] = useState<
-    | (VerificationChronologyEvaluation & {
-        totalQualifyingRecords?: number;
-        isServerVerified?: boolean;
-      })
-    | null
-  >(null);
-  const [isEvaluationLoading, setIsEvaluationLoading] = useState(false);
+  const [evaluationStatus, setEvaluationStatus] = useState<
+    'IDLE' | 'LOADING' | 'VERIFIED' | 'UNVERIFIED' | 'ERROR'
+  >('IDLE');
+  const [evaluationError, setEvaluationError] = useState<string | null>(null);
+  const [serverEvaluation, setServerEvaluation] = useState<any | null>(null);
+  const [staleEvaluation, setStaleEvaluation] = useState<any | null>(null);
+  const [candidatePage, setCandidatePage] = useState<number>(1);
+  const isEvaluationLoading = evaluationStatus === 'LOADING';
 
-  const fetchServerEvaluation = useCallback(async () => {
-    if (previewMode) return;
-    setIsEvaluationLoading(true);
-    try {
-      const res = await fetch(`/api/assets/${assetId}/verifications/evaluation`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.status === 'ok' && json.data) {
-          setServerEvaluation({
-            ...json.data,
-            isServerVerified: true,
-          });
+  const fetchServerEvaluation = useCallback(
+    async (page: number = 1) => {
+      if (previewMode) return;
+      setEvaluationStatus('LOADING');
+      setEvaluationError(null);
+
+      try {
+        const res = await fetch(
+          `/api/assets/${assetId}/verifications/evaluation?page=${page}&limit=10`,
+          { credentials: 'include' }
+        );
+        if (!res.ok) {
+          throw new Error(`Server returned HTTP ${res.status}`);
         }
-      }
-    } catch {
-      // Evaluation fetch error handled gracefully; fallback to truthful unverified state
-    } finally {
-      setIsEvaluationLoading(false);
-    }
-  }, [assetId, previewMode]);
+        let json: any;
+        try {
+          json = await res.json();
+        } catch {
+          throw new Error('Malformed JSON received from server evaluation endpoint');
+        }
+        if (!json || json.status !== 'ok' || !json.data) {
+          throw new Error(json?.error || 'Invalid server evaluation response');
+        }
 
-  // Server-authoritative conflict evaluation
-  // If server-derived evaluation is available, it covers ALL qualifying records in the database.
-  // If only page 1 is loaded and total > verifications.length without server evaluation,
-  // conflict status is truthful: UNVERIFIED.
-  const hasMultiplePages = verificationPagination.total > verifications.length;
+        setServerEvaluation({
+          ...json.data,
+          isServerVerified: true,
+        });
+        setStaleEvaluation(null);
+        setEvaluationStatus('VERIFIED');
+        setCandidatePage(page);
+      } catch (err: any) {
+        // FAIL CLOSED: do NOT leave an old evaluation labeled verified!
+        setServerEvaluation((curr: any) => {
+          if (curr) setStaleEvaluation(curr);
+          return null;
+        });
+        setEvaluationStatus('ERROR');
+        setEvaluationError(err.message || 'Failed to retrieve server evaluation');
+      }
+    },
+    [assetId, previewMode]
+  );
+
+  // Server-authoritative conflict evaluation is ONLY verified when server endpoint succeeds
   const isFullDatasetEvaluated =
-    !!serverEvaluation?.isServerVerified || (!hasMultiplePages && verifications.length > 0);
+    evaluationStatus === 'VERIFIED' && !!serverEvaluation?.isServerVerified;
 
-  const verificationEvaluation: VerificationChronologyEvaluation & { isServerVerified?: boolean } =
-    React.useMemo(() => {
-      if (serverEvaluation?.isServerVerified) {
-        return serverEvaluation;
-      }
-      const qualifying = verifications.filter((v) => v.isSuccessful);
-      const local = evaluateVerificationChronology(
-        qualifying.map((v) => ({
-          id: v.id,
-          outcome: v.outcome,
-          datePrecision: v.datePrecision,
-          verifiedYear: v.verifiedYear,
-          verifiedMonth: v.verifiedMonth,
-          verifiedDay: v.verifiedDay,
-          verifiedDate: v.verifiedDate ? new Date(v.verifiedDate) : null,
-          verifiedYearMonth: v.verifiedYearMonth,
-          verifiedBy: v.verifiedBy,
-          createdAt: new Date(v.createdAt),
-          notes: v.notes,
-        }))
-      );
-      return {
-        ...local,
-        isServerVerified: false,
-      };
-    }, [serverEvaluation, verifications]);
+  const verificationEvaluation = React.useMemo(() => {
+    if (serverEvaluation?.isServerVerified) {
+      return serverEvaluation;
+    }
+    return {
+      isAmbiguous: false,
+      ambiguityReason: null,
+      conflictingYearMonth: null,
+      authoritativeRecord: null,
+      candidates: [] as any[],
+      isServerVerified: false,
+    };
+  }, [serverEvaluation]);
 
   // Load Reference Catalogs for Edit Mode & Transfers
   const loadCatalogs = useCallback(async () => {
@@ -1373,23 +1377,32 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#181d28] pb-2.5">
               <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider flex items-center gap-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                {verificationEvaluation.isAmbiguous
+                {evaluationStatus === 'LOADING'
+                  ? 'Authoritative Verification Summary — Evaluating Server Records...'
+                  : evaluationStatus === 'ERROR'
+                  ? 'Authoritative Verification Summary — Evaluation Failed (Unverified)'
+                  : verificationEvaluation.isAmbiguous
                   ? 'Authoritative Verification Summary — Ambiguity Detected'
-                  : !isFullDatasetEvaluated && hasMultiplePages
-                  ? `Authoritative Verification Summary — Partial View (Page 1 of ${verificationPagination.totalPages})`
+                  : !isFullDatasetEvaluated
+                  ? 'Authoritative Verification Summary — Evaluation Unverified'
                   : 'Latest Confirmed Verification Summary'}
               </span>
-              {verificationEvaluation.isAmbiguous ? (
+              {evaluationStatus === 'LOADING' ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/90 text-zinc-300 uppercase tracking-wider">
+                  <Clock className="w-3 h-3 text-zinc-400 animate-spin" />
+                  Evaluating Server Conflict Status...
+                </span>
+              ) : evaluationStatus === 'ERROR' ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-bold border border-red-700 bg-red-950/80 text-red-300 uppercase tracking-wider">
+                  <AlertCircle className="w-3 h-3 text-red-400" />
+                  Evaluation Error // Authority Unverified
+                </span>
+              ) : verificationEvaluation.isAmbiguous ? (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-bold border border-amber-600/70 bg-amber-950/80 text-amber-300 uppercase tracking-wider">
                   <AlertTriangle className="w-3 h-3 text-amber-400" />
                   Resolution Required (Policy P11-D01)
                 </span>
-              ) : !isFullDatasetEvaluated && hasMultiplePages ? (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-bold border border-zinc-700 bg-zinc-800/90 text-zinc-300 uppercase tracking-wider">
-                  <Clock className="w-3 h-3 text-zinc-400" />
-                  Full-Dataset Conflict Check Pending
-                </span>
-              ) : asset.lastVerificationOutcome ? (
+              ) : isFullDatasetEvaluated && asset.lastVerificationOutcome ? (
                 (() => {
                   const badge = getOutcomeBadge(asset.lastVerificationOutcome);
                   const BadgeIcon = badge.icon;
@@ -1404,20 +1417,39 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
                 })()
               ) : (
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-800/80 border border-zinc-700 text-zinc-400 uppercase">
-                  Not Yet Verified
+                  {isFullDatasetEvaluated ? 'Not Yet Verified' : 'Authority Unverified'}
                 </span>
               )}
             </div>
 
-            {!isFullDatasetEvaluated && hasMultiplePages && !verificationEvaluation.isAmbiguous && (
-              <div className="p-3 bg-zinc-900/60 border border-zinc-800 rounded text-xs text-zinc-400 font-mono space-y-1">
-                <div className="flex items-center gap-1.5 text-zinc-300 font-semibold">
-                  <Info className="w-3.5 h-3.5 text-blue-400" />
-                  Partial History Page Inspected
+            {/* Evaluation Error Banner with GET-only Retry */}
+            {evaluationStatus === 'ERROR' && (
+              <div className="p-3.5 bg-red-950/40 border border-red-700/80 rounded-md text-xs font-mono space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold text-red-300 uppercase flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                    Conflict Evaluation Failed — Authority Unverified
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fetchServerEvaluation(candidatePage)}
+                    disabled={isEvaluationLoading}
+                    className="text-xs text-red-200 border-red-600/70 hover:bg-red-900/40"
+                  >
+                    <RotateCcw className="w-3 h-3 mr-1" />
+                    Retry Evaluation (GET)
+                  </Button>
                 </div>
-                <p className="text-[11px] leading-relaxed">
-                  Only the 10 most recent observations are currently loaded in this client page ({verificationPagination.total} total exist). Because additional observations exist outside this page, full-dataset conflict status is being verified on the server.
+                <p className="text-[11px] text-red-200 leading-relaxed">
+                  {evaluationError || 'Unable to retrieve authoritative verification conflict evaluation from server.'}
                 </p>
+                {staleEvaluation && (
+                  <p className="text-[10px] text-amber-300/90 pt-1 border-t border-red-800/40">
+                    ⚠️ Historical Notice: Previously displayed evaluation data is STALE and cannot be treated as authoritative.
+                  </p>
+                )}
               </div>
             )}
 
@@ -1438,13 +1470,20 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
                   </div>
                 </div>
 
-                {/* Candidate Observations Table */}
+                {/* Candidate Observations Table with Bounded Pagination */}
                 <div className="space-y-1.5 pt-1">
-                  <div className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
-                    Competing Candidate Observations for {verificationEvaluation.conflictingYearMonth}:
+                  <div className="flex flex-wrap items-center justify-between text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
+                    <span>
+                      Competing Candidate Observations for {verificationEvaluation.conflictingYearMonth}:
+                    </span>
+                    {serverEvaluation?.candidatePagination && (
+                      <span className="text-zinc-500 font-mono">
+                        Showing {verificationEvaluation.candidates?.length} of {serverEvaluation.candidatePagination.total} total candidates
+                      </span>
+                    )}
                   </div>
                   <div className="border border-zinc-800 rounded overflow-hidden divide-y divide-zinc-800/80 bg-zinc-950/70">
-                    {verificationEvaluation.candidates?.map((candidate) => {
+                    {verificationEvaluation.candidates?.map((candidate: any) => {
                       const badge = getOutcomeBadge(candidate.outcome || 'VERIFIED_MATCH');
                       const BadgeIcon = badge.icon;
                       return (
@@ -1454,7 +1493,7 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
                         >
                           <div className="space-y-0.5 min-w-[220px]">
                             <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-bold text-zinc-400">
+                              <span className="text-[10px] font-bold text-zinc-400 font-mono">
                                 ID: {candidate.id.slice(0, 8)}...
                               </span>
                               <span
@@ -1491,6 +1530,37 @@ export const AssetDetailsView: React.FC<AssetDetailsViewProps> = ({
                       );
                     })}
                   </div>
+
+                  {/* Candidate Pagination Navigation */}
+                  {serverEvaluation?.candidatePagination && serverEvaluation.candidatePagination.totalPages > 1 && (
+                    <div className="flex items-center justify-between pt-2 text-xs font-mono">
+                      <span className="text-[10px] text-zinc-400">
+                        Candidate Page {serverEvaluation.candidatePagination.page} of {serverEvaluation.candidatePagination.totalPages}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={candidatePage <= 1 || isEvaluationLoading}
+                          onClick={() => fetchServerEvaluation(candidatePage - 1)}
+                          className="text-xs"
+                        >
+                          Previous
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={candidatePage >= serverEvaluation.candidatePagination.totalPages || isEvaluationLoading}
+                          onClick={() => fetchServerEvaluation(candidatePage + 1)}
+                          className="text-xs"
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Schema Approval Gate Notice */}
